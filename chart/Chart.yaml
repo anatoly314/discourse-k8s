@@ -1,0 +1,20 @@
+apiVersion: v2
+name: discourse
+description: A Helm chart for deploying Discourse forum on Kubernetes using Nfrastack base image with Redis sidecar
+type: application
+version: 0.1.0
+appVersion: "v2026.2.1"
+home: https://github.com/anatoly314/discourse-k8s
+sources:
+  - https://github.com/anatoly314/discourse-k8s
+  - https://github.com/nfrastack/container-discourse
+  - https://www.discourse.org
+maintainers:
+  - name: Anatoly
+    url: https://github.com/anatoly314
+keywords:
+  - discourse
+  - forum
+  - community
+  - discussion
+  - kubernetes

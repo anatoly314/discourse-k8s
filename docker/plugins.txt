@@ -1,0 +1,40 @@
+# =============================================================================
+# Discourse plugin reference list
+# =============================================================================
+#
+# This file is NOT consumed by the Dockerfile build. It exists as documentation
+# and as a reference for plugin-tool if you ever need to install a specific
+# version from git (e.g., plugin-tool install <url>).
+#
+# The Dockerfile enables bundled plugins via symlinks from
+# /container/data/discourse/plugins/ -- it does not clone anything from git.
+#
+# Name corrections from CLAUDE.md original spec:
+#   - "discourse-voting"  -> actual plugin is "discourse-topic-voting"
+#   - "discourse-polls"   -> core directory is "poll" (singular, no prefix)
+#   - "discourse-chat"    -> core directory is "chat" (no prefix)
+#   - "discourse-automation" -> core directory is "automation" (no prefix)
+# =============================================================================
+
+# --- SSO / Authentication ---
+https://github.com/discourse/discourse-openid-connect.git    # Keycloak SSO via OIDC (discovery, PKCE, RP-initiated logout)
+
+# --- Community features ---
+https://github.com/discourse/discourse-topic-voting.git      # Category-level feature voting with vote pools
+https://github.com/discourse/discourse-solved.git             # Mark replies as accepted solutions
+https://github.com/discourse/discourse-assign.git             # Assign topics/posts to staff members
+https://github.com/discourse/discourse-reactions.git          # Post reactions beyond simple likes
+
+# --- AI ---
+https://github.com/discourse/discourse-ai.git                # AI-powered features (summarize, classify, embeddings)
+
+# --- Bundled core plugins (ship with Discourse, no separate repo) ---
+# These live inside the main discourse/discourse repo under plugins/:
+#   plugins/chat                    # Real-time chat channels, DMs, threads
+#   plugins/automation              # Automate actions via triggers and scripts
+#   plugins/poll                    # Create polls in posts
+#   plugins/checklist               # Checkbox lists in posts
+#   plugins/discourse-details       # Collapsible detail/summary blocks
+#   plugins/discourse-narrative-bot # New user tutorial bot
+#   plugins/discourse-presence      # "user is typing" indicators
+#   plugins/styleguide              # Admin style guide for theming

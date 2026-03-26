@@ -1,0 +1,4 @@
+# Exclude everything from the build context -- nothing is COPY'd into the image.
+# The Dockerfile only extends the Nfrastack base image with RUN commands.
+*
+!Dockerfile

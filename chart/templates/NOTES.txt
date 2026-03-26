@@ -1,0 +1,60 @@
+===========================================================================
+  Discourse has been deployed!
+===========================================================================
+
+{{- if not .Values.discourse.hostname }}
+
+  WARNING: discourse.hostname is not set!
+  The deployment will fail. Set it to your forum's public hostname.
+
+{{- end }}
+
+{{- if not .Values.discourse.database.host }}
+
+  WARNING: discourse.database.host is not set!
+  The deployment will fail. Set it to your PostgreSQL host.
+
+{{- end }}
+
+  Hostname:      {{ .Values.discourse.hostname | default "<NOT SET>" }}
+  Database host: {{ .Values.discourse.database.host | default "<NOT SET>" }}
+  Redis:         {{ .Values.discourse.redis.host }}:{{ .Values.discourse.redis.port }}
+
+{{- if .Values.ingress.enabled }}
+
+  Access your forum at:
+  {{- range .Values.ingress.hosts }}
+    http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+  {{- end }}
+
+{{- else }}
+
+  To access Discourse, run:
+
+    kubectl port-forward svc/{{ include "discourse.fullname" . }} 3000:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+
+  Then open http://localhost:3000 in your browser.
+
+{{- end }}
+
+  FIRST BOOT NOTES:
+  -----------------
+  * First startup can take 5-10 minutes while database migrations run.
+  * The startup probe allows up to ~10 minutes before marking the pod as failed.
+  * Monitor progress with:
+
+      kubectl logs -f deploy/{{ include "discourse.fullname" . }} -c discourse -n {{ .Release.Namespace }}
+
+{{- if .Values.discourse.admin.email }}
+
+  Admin account will be created on first boot:
+    Username: {{ .Values.discourse.admin.username }}
+    Email:    {{ .Values.discourse.admin.email }}
+
+{{- end }}
+
+{{- if .Values.discourse.developerEmails }}
+
+  Developer emails (initial admin access): {{ .Values.discourse.developerEmails }}
+
+{{- end }}

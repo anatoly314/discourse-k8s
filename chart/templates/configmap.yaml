@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "discourse.configmapName" . }}
+  labels:
+    {{- include "discourse.labels" . | nindent 4 }}
+data:
+  # -- Site identity --
+  SITE_HOSTNAME: {{ required "discourse.hostname is required" .Values.discourse.hostname | quote }}
+  {{- if .Values.discourse.developerEmails }}
+  DEVELOPER_EMAILS: {{ .Values.discourse.developerEmails | quote }}
+  {{- end }}
+
+  # -- Database --
+  DB_HOST: {{ required "discourse.database.host is required" .Values.discourse.database.host | quote }}
+  DB_PORT: {{ .Values.discourse.database.port | quote }}
+  DB_NAME: {{ .Values.discourse.database.name | quote }}
+  DB_USER: {{ .Values.discourse.database.username | quote }}
+  DB_POOL: {{ .Values.discourse.database.pool | quote }}
+
+  # -- Redis --
+  REDIS_HOST: {{ .Values.discourse.redis.host | quote }}
+  REDIS_PORT: {{ .Values.discourse.redis.port | quote }}
+  REDIS_DB: {{ .Values.discourse.redis.db | quote }}
+
+  # -- SMTP --
+  {{- if .Values.discourse.smtp.address }}
+  SMTP_HOST: {{ .Values.discourse.smtp.address | quote }}
+  {{- end }}
+  {{- if .Values.discourse.smtp.port }}
+  SMTP_PORT: {{ .Values.discourse.smtp.port | quote }}
+  {{- end }}
+  {{- if .Values.discourse.smtp.domain }}
+  SMTP_DOMAIN: {{ .Values.discourse.smtp.domain | quote }}
+  {{- end }}
+  {{- if .Values.discourse.smtp.username }}
+  SMTP_USER: {{ .Values.discourse.smtp.username | quote }}
+  {{- end }}
+  {{- if .Values.discourse.smtp.authentication }}
+  SMTP_AUTHENTICATION: {{ .Values.discourse.smtp.authentication | quote }}
+  {{- end }}
+  SMTP_START_TLS: {{ ternary "TRUE" "FALSE" .Values.discourse.smtp.enableStartTls | quote }}
+
+  # -- Serving --
+  SERVE_STATIC_ASSETS: {{ ternary "TRUE" "FALSE" .Values.discourse.serveStaticAssets | quote }}
+  DELIVER_SECURE_ASSETS: {{ ternary "TRUE" "FALSE" .Values.discourse.forceHttps | quote }}
+
+  # -- Performance --
+  UNICORN_WORKERS: {{ .Values.discourse.unicornWorkers | quote }}
+  SIDEKIQ_THREADS: {{ .Values.discourse.sidekiqThreads | quote }}
+
+  # -- Startup behavior --
+  ENABLE_DB_MIGRATE: {{ ternary "TRUE" "FALSE" .Values.discourse.enableDbMigrate | quote }}
+  ENABLE_PRECOMPILE_ASSETS: {{ ternary "TRUE" "FALSE" .Values.discourse.enablePrecompileAssets | quote }}
+
+  # -- Admin (first boot only) --
+  {{- if .Values.discourse.admin.email }}
+  ADMIN_EMAIL: {{ .Values.discourse.admin.email | quote }}
+  {{- end }}
+  {{- if .Values.discourse.admin.username }}
+  ADMIN_USER: {{ .Values.discourse.admin.username | quote }}
+  {{- end }}
+  {{- if .Values.discourse.admin.name }}
+  ADMIN_NAME: {{ .Values.discourse.admin.name | quote }}
+  {{- end }}
+
+  # -- Plugins --
+  {{- range $name, $enabled := .Values.discourse.plugins }}
+  PLUGIN_ENABLE_{{ $name | upper | replace "-" "_" }}: {{ ternary "TRUE" "FALSE" $enabled | quote }}
+  {{- end }}
