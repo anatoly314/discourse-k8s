@@ -47,36 +47,37 @@ LABEL org.opencontainers.image.title="Discourse (AnkiMCP)" \
 # -----------------------------------------------------------------------------
 # Stage 1: Enable plugins via symlinks
 # -----------------------------------------------------------------------------
-# Plugin mapping: shortname -> directory name under /container/data/discourse/plugins/
+# Symlink names MUST match the original directory names from Discourse core.
+# Discourse loads plugins alphabetically by directory name, and some plugins
+# depend on others (e.g., discourse-assign calls add_automation_scriptable
+# from automation). Using the original names preserves the correct load order:
+#   automation < discourse-assign (good: automation loads first)
+# vs shortened names:
+#   assign < automation (bad: assign loads first, crashes)
 #
-# Some bundled plugins use a "discourse-" prefix in their directory name, others
-# don't (core plugins like chat, poll, automation). The shortname is what
-# plugin-tool uses for the symlink target in /app/plugins/.
-#
-# This mapping was verified against Discourse core and the Nfrastack image.
 # If a plugin directory doesn't exist (e.g., the base image version changed),
 # we warn but continue -- the plugin simply won't be available.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
     \
-    # Define plugin mappings as "shortname:dirname" pairs.
-    # Left side = symlink name in /app/plugins/
-    # Right side = directory name in /container/data/discourse/plugins/
+    # Each entry is the directory name under /container/data/discourse/plugins/
+    # which is also used as the symlink name in /app/plugins/ to preserve
+    # alphabetical load order.
     PLUGINS=" \
-        openid-connect:discourse-openid-connect \
-        topic-voting:discourse-topic-voting \
-        chat:chat \
-        solved:discourse-solved \
-        ai:discourse-ai \
-        assign:discourse-assign \
-        automation:automation \
-        poll:poll \
-        checklist:checklist \
-        details:discourse-details \
-        narrative-bot:discourse-narrative-bot \
-        presence:discourse-presence \
-        reactions:discourse-reactions \
-        styleguide:styleguide \
+        automation \
+        chat \
+        checklist \
+        discourse-ai \
+        discourse-assign \
+        discourse-details \
+        discourse-narrative-bot \
+        discourse-openid-connect \
+        discourse-presence \
+        discourse-reactions \
+        discourse-solved \
+        discourse-topic-voting \
+        poll \
+        styleguide \
     "; \
     \
     PLUGIN_IMAGE_PATH="/container/data/discourse/plugins"; \
@@ -84,22 +85,19 @@ RUN set -eux; \
     \
     mkdir -p "${PLUGIN_ENABLED_PATH}"; \
     \
-    for mapping in ${PLUGINS}; do \
-        shortname="${mapping%%:*}"; \
-        dirname="${mapping##*:}"; \
-        target="${PLUGIN_IMAGE_PATH}/${dirname}"; \
-        link="${PLUGIN_ENABLED_PATH}/${shortname}"; \
+    for plugindir in ${PLUGINS}; do \
+        target="${PLUGIN_IMAGE_PATH}/${plugindir}"; \
+        link="${PLUGIN_ENABLED_PATH}/${plugindir}"; \
         \
         if [ -d "${target}" ]; then \
             ln -sfn "${target}" "${link}"; \
-            echo "PLUGIN: enabled ${shortname} -> ${target}"; \
+            echo "PLUGIN: enabled ${plugindir}"; \
         else \
             echo "WARNING: plugin directory not found: ${target}" >&2; \
         fi; \
     done; \
     \
-    # Fix symlink ownership (chown -h follows the symlink flag convention --
-    # on Linux it changes the symlink itself, not the target)
+    # Fix symlink ownership (chown -h changes the symlink itself, not the target)
     chown -h discourse:discourse ${PLUGIN_ENABLED_PATH}/*; \
     \
     echo "=== Enabled plugins ==="; \
