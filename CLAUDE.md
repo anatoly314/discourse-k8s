@@ -74,9 +74,7 @@ helm upgrade discourse chart/ -f my-values.yaml --namespace discourse
 
 ## Reference Documentation
 
-Detailed specs are in `.docs/`:
-- [`.docs/specifications.md`](.docs/specifications.md) — env vars, health checks, storage paths, startup sequence
-- [`.docs/integration.md`](.docs/integration.md) — ArgoCD, secrets management, Jenkins pipeline
+Detailed specs (env vars, health checks, storage, integration points) are in `.docs/` (gitignored — local only).
 
 ## Key References
 
