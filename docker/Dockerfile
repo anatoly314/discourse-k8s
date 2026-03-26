@@ -15,17 +15,20 @@
 #   Discourse plugins contribute JS/CSS to the compiled asset bundle. If plugins
 #   aren't present when `rake assets:precompile` runs, they're invisible to the
 #   frontend. The Nfrastack base image ships all bundled Discourse plugins under
-#   /container/data/discourse/plugins/ but doesn't enable them or precompile
-#   assets. We do both here so the image is ready to serve immediately.
+#   /container/data/discourse/plugins/ but doesn't precompile assets. We point
+#   /app/plugins at that directory and precompile so the image is ready to serve.
 #
-# Plugin symlink mechanism:
-#   The base image moves all plugins from /app/plugins/ to
-#   /container/data/discourse/plugins/<dirname> during its own build.
-#   At runtime, plugin-tool creates symlinks:
-#     /app/plugins/<shortname> -> /container/data/discourse/plugins/<dirname>
-#   We replicate this at build time so assets:precompile sees the plugins.
-#   These symlinks are throwaway -- plugin-tool sync recreates them at container
-#   init based on PLUGIN_ENABLE_* env vars.
+# Plugin loading:
+#   Discourse scans /app/plugins/*/plugin.rb (one directory, alphabetical order).
+#   The base image stores all bundled plugins at /container/data/discourse/plugins/.
+#   We replace /app/plugins with a symlink to that directory so Discourse sees
+#   ALL bundled plugins during precompilation. This also preserves the correct
+#   alphabetical load order from Discourse core (important: automation must load
+#   before discourse-assign because assign depends on automation's methods).
+#
+#   At runtime, Nfrastack's bootstrap replaces /app/plugins with a symlink to
+#   /data/plugins/, and plugin-tool sync creates per-plugin symlinks there
+#   based on PLUGIN_ENABLE_* env vars. Our build-time symlink is throwaway.
 # =============================================================================
 
 ARG BASE_IMAGE=ghcr.io/nfrastack/container-discourse:latest
@@ -45,63 +48,22 @@ LABEL org.opencontainers.image.title="Discourse (AnkiMCP)" \
       org.opencontainers.image.licenses="MIT"
 
 # -----------------------------------------------------------------------------
-# Stage 1: Enable plugins via symlinks
+# Make all bundled plugins visible for asset precompilation
 # -----------------------------------------------------------------------------
-# Symlink names MUST match the original directory names from Discourse core.
-# Discourse loads plugins alphabetically by directory name, and some plugins
-# depend on others (e.g., discourse-assign calls add_automation_scriptable
-# from automation). Using the original names preserves the correct load order:
-#   automation < discourse-assign (good: automation loads first)
-# vs shortened names:
-#   assign < automation (bad: assign loads first, crashes)
+# Replace /app/plugins with a direct symlink to the bundled plugins directory.
+# This avoids double-loading (only one physical path) and preserves the correct
+# alphabetical load order from Discourse core:
+#   automation < discourse-assign  (assign depends on automation's methods)
 #
-# If a plugin directory doesn't exist (e.g., the base image version changed),
-# we warn but continue -- the plugin simply won't be available.
+# All bundled plugins will be compiled. At runtime, plugin-tool sync selectively
+# enables/disables plugins via PLUGIN_ENABLE_* env vars — the build-time
+# symlink is replaced by Nfrastack's bootstrap process.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
-    \
-    # Each entry is the directory name under /container/data/discourse/plugins/
-    # which is also used as the symlink name in /app/plugins/ to preserve
-    # alphabetical load order.
-    PLUGINS=" \
-        automation \
-        chat \
-        checklist \
-        discourse-ai \
-        discourse-assign \
-        discourse-details \
-        discourse-narrative-bot \
-        discourse-openid-connect \
-        discourse-presence \
-        discourse-reactions \
-        discourse-solved \
-        discourse-topic-voting \
-        poll \
-        styleguide \
-    "; \
-    \
-    PLUGIN_IMAGE_PATH="/container/data/discourse/plugins"; \
-    PLUGIN_ENABLED_PATH="/app/plugins"; \
-    \
-    mkdir -p "${PLUGIN_ENABLED_PATH}"; \
-    \
-    for plugindir in ${PLUGINS}; do \
-        target="${PLUGIN_IMAGE_PATH}/${plugindir}"; \
-        link="${PLUGIN_ENABLED_PATH}/${plugindir}"; \
-        \
-        if [ -d "${target}" ]; then \
-            ln -sfn "${target}" "${link}"; \
-            echo "PLUGIN: enabled ${plugindir}"; \
-        else \
-            echo "WARNING: plugin directory not found: ${target}" >&2; \
-        fi; \
-    done; \
-    \
-    # Fix symlink ownership (chown -h changes the symlink itself, not the target)
-    chown -h discourse:discourse ${PLUGIN_ENABLED_PATH}/*; \
-    \
-    echo "=== Enabled plugins ==="; \
-    ls -la ${PLUGIN_ENABLED_PATH}/
+    rm -rf /app/plugins; \
+    ln -s /container/data/discourse/plugins /app/plugins; \
+    echo "=== Plugins visible for precompilation ==="; \
+    ls -la /app/plugins/
 
 # -----------------------------------------------------------------------------
 # Stage 2: Precompile assets
