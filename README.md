@@ -147,141 +147,175 @@ kubectl port-forward svc/discourse 3000:80 -n discourse
 # Open http://localhost:3000
 ```
 
-## Configuration Reference
+## Parameters
 
-All configuration is in [`chart/values.yaml`](chart/values.yaml). Below are the key sections -- see the file itself for inline comments and all available options.
+### Image parameters
 
-### Required Values
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `image.repository` | Discourse container image repository | `""` |
+| `image.tag` | Discourse container image tag (defaults to Chart.appVersion if empty) | `""` |
+| `image.pullPolicy` | Discourse container image pull policy | `IfNotPresent` |
+| `imagePullSecrets` | Docker registry secret names as an array | `[]` |
+| `nameOverride` | String to partially override the release name | `""` |
+| `fullnameOverride` | String to fully override the release name | `""` |
 
-| Value | Description |
-|-------|-------------|
-| `image.repository` | Your custom Discourse image (e.g. `ghcr.io/anatoly314/discourse-k8s`) |
-| `discourse.hostname` | Public hostname for the forum |
-| `discourse.database.host` | PostgreSQL host |
+### Redis sidecar parameters
 
-### Secrets
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `redis.image.repository` | Redis sidecar image repository | `redis` |
+| `redis.image.tag` | Redis sidecar image tag | `7-alpine` |
+| `redis.image.pullPolicy` | Redis sidecar image pull policy | `IfNotPresent` |
+| `redis.resources.requests.memory` | Redis sidecar memory request | `64Mi` |
+| `redis.resources.requests.cpu` | Redis sidecar CPU request | `50m` |
+| `redis.resources.limits.memory` | Redis sidecar memory limit | `128Mi` |
 
-Every secret field supports two patterns:
+### Discourse parameters
 
-**Inline (simple, not recommended for production):**
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `discourse.hostname` | Public hostname for the forum (required) | `""` |
+| `discourse.developerEmails` | Comma-separated emails that get initial admin access (required for first boot) | `""` |
+| `discourse.admin.username` | Admin account username (first boot only) | `"admin"` |
+| `discourse.admin.email` | Admin account email (first boot only) | `""` |
+| `discourse.admin.name` | Admin account display name (first boot only) | `"Admin User"` |
+| `discourse.admin.password` | Admin account password, min 10 chars (ignored if existingSecret is set) | `""` |
+| `discourse.admin.existingSecret` | Name of an existing Secret containing the admin password | `""` |
+| `discourse.admin.secretKey` | Key within the existing Secret for the admin password | `admin-password` |
+| `discourse.database.host` | PostgreSQL host (required) | `""` |
+| `discourse.database.port` | PostgreSQL port | `5432` |
+| `discourse.database.name` | PostgreSQL database name | `discourse` |
+| `discourse.database.username` | PostgreSQL username | `discourse` |
+| `discourse.database.pool` | PostgreSQL connection pool size | `8` |
+| `discourse.database.password` | PostgreSQL password (ignored if existingSecret is set) | `""` |
+| `discourse.database.existingSecret` | Name of an existing Secret containing the database password | `""` |
+| `discourse.database.secretKey` | Key within the existing Secret for the database password | `db-password` |
+| `discourse.redis.host` | Redis host (defaults to localhost sidecar) | `localhost` |
+| `discourse.redis.port` | Redis port | `6379` |
+| `discourse.redis.db` | Redis database number | `0` |
+| `discourse.smtp.address` | SMTP server address | `""` |
+| `discourse.smtp.port` | SMTP server port | `587` |
+| `discourse.smtp.domain` | SMTP HELO domain | `""` |
+| `discourse.smtp.username` | SMTP username | `""` |
+| `discourse.smtp.authentication` | SMTP authentication method (plain, login, or cram_md5) | `plain` |
+| `discourse.smtp.enableStartTls` | Enable STARTTLS for SMTP | `true` |
+| `discourse.smtp.password` | SMTP password (ignored if existingSecret is set) | `""` |
+| `discourse.smtp.existingSecret` | Name of an existing Secret containing the SMTP password | `""` |
+| `discourse.smtp.secretKey` | Key within the existing Secret for the SMTP password | `smtp-password` |
+| `discourse.secretKeyBase.value` | Rails secret key base, 128-char hex string (ignored if existingSecret is set) | `""` |
+| `discourse.secretKeyBase.existingSecret` | Name of an existing Secret containing the secret key base | `""` |
+| `discourse.secretKeyBase.secretKey` | Key within the existing Secret for the secret key base | `secret-key-base` |
+| `discourse.serveStaticAssets` | Serve static assets directly from Unicorn (no nginx in front) | `true` |
+| `discourse.forceHttps` | Force HTTPS (maps to DELIVER_SECURE_ASSETS in Nfrastack) | `true` |
+| `discourse.unicornWorkers` | Number of Unicorn web server worker processes | `4` |
+| `discourse.sidekiqThreads` | Number of Sidekiq background job threads | `5` |
+| `discourse.enableDbMigrate` | Run database migrations on startup | `true` |
+| `discourse.enablePrecompileAssets` | Precompile assets on startup (leave false -- bake into Docker image instead) | `false` |
+| `discourse.plugins` | Map of plugin short names to booleans to enable/disable bundled plugins | `{}` |
+| `discourse.extraEnv` | Array of extra environment variables for the Discourse container | `[]` |
 
-```yaml
-discourse:
-  database:
-    password: "my-password"
+> **OIDC (OpenID Connect)** is configured via Discourse site settings, not environment variables. Use `discourse.extraEnv` to set them at deploy time:
+>
+> ```yaml
+> discourse:
+>   extraEnv:
+>     - name: DISCOURSE_OPENID_CONNECT_ENABLED
+>       value: "true"
+>     - name: DISCOURSE_OPENID_CONNECT_DISCOVERY_DOCUMENT
+>       value: "https://keycloak.example.com/realms/myrealm/.well-known/openid-configuration"
+>     - name: DISCOURSE_OPENID_CONNECT_CLIENT_ID
+>       value: "discourse"
+>     - name: DISCOURSE_OPENID_CONNECT_CLIENT_SECRET
+>       valueFrom:
+>         secretKeyRef:
+>           name: discourse-oidc
+>           key: client-secret
+> ```
+
+### Init container parameters
+
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `initContainers.waitForPostgres.enabled` | Enable init container that waits for PostgreSQL to be reachable | `true` |
+| `initContainers.waitForPostgres.image.repository` | Init container image repository | `busybox` |
+| `initContainers.waitForPostgres.image.tag` | Init container image tag | `"1.37"` |
+| `initContainers.waitForPostgres.image.pullPolicy` | Init container image pull policy | `IfNotPresent` |
+
+### Persistence parameters
+
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `persistence.uploads.enabled` | Enable persistent storage for user uploads, avatars, and attachments | `true` |
+| `persistence.uploads.size` | Size of the uploads PVC | `10Gi` |
+| `persistence.uploads.storageClass` | Storage class for the uploads PVC (empty string uses cluster default) | `""` |
+| `persistence.uploads.accessModes` | Access modes for the uploads PVC | `["ReadWriteOnce"]` |
+| `persistence.uploads.existingClaim` | Name of an existing PVC to use for uploads | `""` |
+| `persistence.backups.enabled` | Enable persistent storage for Discourse backup archives | `false` |
+| `persistence.backups.size` | Size of the backups PVC | `10Gi` |
+| `persistence.backups.storageClass` | Storage class for the backups PVC (empty string uses cluster default) | `""` |
+| `persistence.backups.accessModes` | Access modes for the backups PVC | `["ReadWriteOnce"]` |
+| `persistence.backups.existingClaim` | Name of an existing PVC to use for backups | `""` |
+
+### Network parameters
+
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `service.type` | Kubernetes Service type | `ClusterIP` |
+| `service.port` | Service port | `80` |
+| `service.targetPort` | Container port the Service routes to | `3000` |
+| `service.annotations` | Additional annotations for the Service | `{}` |
+| `ingress.enabled` | Enable Ingress resource | `false` |
+| `ingress.className` | Ingress class name | `""` |
+| `ingress.annotations` | Additional annotations for the Ingress | `{}` |
+| `ingress.hosts` | Array of Ingress host configurations | `[]` |
+| `ingress.tls` | Array of Ingress TLS configurations | `[]` |
+
+### Resource parameters
+
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `resources.requests.memory` | Discourse container memory request | `1Gi` |
+| `resources.requests.cpu` | Discourse container CPU request | `500m` |
+| `resources.limits.memory` | Discourse container memory limit | `2Gi` |
+
+### Service account parameters
+
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `serviceAccount.create` | Create a ServiceAccount for the pod | `false` |
+| `serviceAccount.annotations` | Additional annotations for the ServiceAccount | `{}` |
+| `serviceAccount.name` | Name of the ServiceAccount (auto-generated if empty and create is true) | `""` |
+
+### Pod parameters
+
+| Name | Description | Value |
+| ---- | ----------- | ----- |
+| `nodeSelector` | Node labels for pod assignment | `{}` |
+| `tolerations` | Tolerations for pod scheduling | `[]` |
+| `affinity` | Affinity rules for pod scheduling | `{}` |
+| `podAnnotations` | Additional annotations for the pod | `{}` |
+| `podLabels` | Additional labels for the pod | `{}` |
+| `podSecurityContext` | Security context for the pod | `{}` |
+| `securityContext` | Security context for the Discourse container | `{}` |
+| `restartPolicy` | Pod restart policy | `Always` |
+| `terminationGracePeriodSeconds` | Seconds the pod needs to terminate gracefully | `60` |
+
+Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. For example:
+
+```bash
+helm install discourse oci://ghcr.io/anatoly314/helm-charts/discourse \
+  --set discourse.hostname=forum.example.com \
+  --set discourse.database.host=postgres.svc.cluster.local
 ```
 
-**External Secret (for Vault, ESO, or any pre-existing Secret):**
+Alternatively, provide a YAML file with the values using `-f`:
 
-```yaml
-discourse:
-  database:
-    existingSecret: "my-vault-synced-secret"
-    secretKey: db-password       # key within the Secret
+```bash
+helm install discourse oci://ghcr.io/anatoly314/helm-charts/discourse -f my-values.yaml
 ```
 
-The `existingSecret` pattern works for all four secrets: `database`, `smtp`, `secretKeyBase`, and `admin`.
-
-### SMTP
-
-```yaml
-discourse:
-  smtp:
-    address: smtp.example.com
-    port: 587
-    domain: example.com
-    username: "user"
-    password: "pass"
-    authentication: plain          # plain, login, or cram_md5
-    enableStartTls: true
-```
-
-### Plugins
-
-Plugins bundled in the Docker image can be toggled on or off. The keys map to `PLUGIN_ENABLE_<UPPER_NAME>` environment variables consumed by the Nfrastack plugin-tool:
-
-```yaml
-discourse:
-  plugins:
-    openid-connect: true
-    chat: true
-    solved: true
-    ai: false
-```
-
-The default Docker image enables these plugins by default (see Dockerfile ENV block). You only need the `plugins` map in your values if you want to override the image defaults.
-
-### Persistence
-
-```yaml
-persistence:
-  uploads:
-    enabled: true              # user uploads, avatars, attachments
-    size: 10Gi
-    storageClass: ""           # uses cluster default
-    existingClaim: ""          # use a pre-existing PVC
-  backups:
-    enabled: false             # Discourse backup archives
-    size: 10Gi
-```
-
-### Ingress
-
-```yaml
-ingress:
-  enabled: true
-  className: traefik
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt
-  hosts:
-    - host: forum.example.com
-      paths:
-        - path: /
-          pathType: Prefix
-  tls:
-    - secretName: forum-tls
-      hosts:
-        - forum.example.com
-```
-
-### Performance Tuning
-
-```yaml
-discourse:
-  unicornWorkers: 4       # web server worker processes
-  sidekiqThreads: 5       # background job concurrency
-
-resources:
-  requests:
-    memory: 1Gi
-    cpu: 500m
-  limits:
-    memory: 2Gi
-
-redis:
-  resources:
-    requests:
-      memory: 64Mi
-      cpu: 50m
-    limits:
-      memory: 128Mi
-```
-
-### Extra Environment Variables
-
-For any configuration not covered by named values:
-
-```yaml
-discourse:
-  extraEnv:
-    - name: TIMEZONE
-      value: "UTC"
-    - name: DISCOURSE_S3_BUCKET
-      valueFrom:
-        secretKeyRef:
-          name: my-s3-secret
-          key: bucket
-```
+> **Note:** Every secret field (database, smtp, secretKeyBase, admin) supports two patterns -- an inline `password`/`value` for simple setups, or `existingSecret` + `secretKey` to reference a pre-existing Kubernetes Secret (for Vault, ESO, or similar operators). See the table entries above for each field.
 
 ## Building the Custom Image
 
@@ -314,6 +348,38 @@ docker build \
 The image enables bundled plugins via `PLUGIN_ENABLE_*` environment variables. To add a third-party plugin (one not shipped with Discourse core), you would need to modify the Dockerfile to clone it into `/app/plugins/` before the asset precompilation step.
 
 The [`docker/plugins.txt`](docker/plugins.txt) file documents all plugin Git URLs for reference but is not consumed by the build.
+
+## Docker Image Environment Variables
+
+### Customizable environment variables
+
+| Name | Description | Default Value |
+| ---- | ----------- | ------------- |
+| `ENABLE_PRECOMPILE_ASSETS` | Precompile assets on startup (FALSE because assets are already compiled in this image) | `FALSE` |
+| `ENABLE_DB_MIGRATE` | Run Rails database migrations on every startup (safe -- migrations are idempotent) | `TRUE` |
+| `SERVE_STATIC_ASSETS` | Serve static assets directly from Unicorn (no nginx in front) | `TRUE` |
+| `PLUGIN_PRIORITY` | Prefer image-bundled plugins over host-mounted plugins in /data/plugins/ | `image` |
+| `PLUGIN_ENABLE_OPENID_CONNECT` | Enable the OpenID Connect SSO plugin | `TRUE` |
+| `PLUGIN_ENABLE_TOPIC_VOTING` | Enable the Topic Voting plugin | `TRUE` |
+| `PLUGIN_ENABLE_CHAT` | Enable the Chat plugin (channels, DMs, threads) | `TRUE` |
+| `PLUGIN_ENABLE_SOLVED` | Enable the Solved plugin (mark replies as accepted solutions) | `TRUE` |
+| `PLUGIN_ENABLE_AI` | Enable the AI plugin (summarize, classify) | `TRUE` |
+| `PLUGIN_ENABLE_ASSIGN` | Enable the Assign plugin (assign topics to staff) | `TRUE` |
+| `PLUGIN_ENABLE_AUTOMATION` | Enable the Automation plugin (triggers and actions) | `TRUE` |
+| `PLUGIN_ENABLE_POLL` | Enable the Poll plugin | `TRUE` |
+| `PLUGIN_ENABLE_CHECKLIST` | Enable the Checklist plugin (checkbox lists in posts) | `TRUE` |
+| `PLUGIN_ENABLE_DETAILS` | Enable the Details plugin (collapsible blocks) | `TRUE` |
+| `PLUGIN_ENABLE_NARRATIVE_BOT` | Enable the Narrative Bot plugin (new user tutorial) | `TRUE` |
+| `PLUGIN_ENABLE_PRESENCE` | Enable the Presence plugin (typing indicators) | `TRUE` |
+| `PLUGIN_ENABLE_REACTIONS` | Enable the Reactions plugin (post reactions) | `TRUE` |
+| `PLUGIN_ENABLE_STYLEGUIDE` | Enable the Styleguide plugin (admin theming reference) | `TRUE` |
+
+### Build arguments
+
+| Name | Description | Default Value |
+| ---- | ----------- | ------------- |
+| `BASE_IMAGE` | Nfrastack base image used as the build foundation | `ghcr.io/nfrastack/container-discourse:latest` |
+| `DISCOURSE_VERSION` | Discourse version label applied to OCI image metadata | `v2026.2.1` |
 
 ## CI/CD
 
