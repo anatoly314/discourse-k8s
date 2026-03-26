@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Extends the Nfrastack base image to:
-#   1. Enable bundled plugins at build time (via symlinks)
+#   1. Copy bundled plugins into /app/plugins at build time
 #   2. Precompile assets so pods start in seconds, not 5-15 minutes
 #
 # Build:
@@ -15,20 +15,31 @@
 #   Discourse plugins contribute JS/CSS to the compiled asset bundle. If plugins
 #   aren't present when `rake assets:precompile` runs, they're invisible to the
 #   frontend. The Nfrastack base image ships all bundled Discourse plugins under
-#   /container/data/discourse/plugins/ but doesn't precompile assets. We point
-#   /app/plugins at that directory and precompile so the image is ready to serve.
+#   /container/data/discourse/plugins/ but doesn't precompile assets. We hard-copy
+#   them into /app/plugins and precompile so the image is ready to serve.
 #
-# Plugin loading:
+# Why hard-copy instead of symlink:
+#   Symlinking /app/plugins -> /container/data/discourse/plugins/ causes Ruby to
+#   double-load every plugin file due to a symlink/realpath mismatch. Several
+#   Discourse plugins (automation, chat, reactions, etc.) use Rails::Engine
+#   subclasses. When the engine file is loaded via require_relative from a
+#   symlink path, __dir__ inside the engine resolves to the real (target) path,
+#   not the symlink path. The engine then registers autoload_paths using the
+#   real path, while $LOADED_FEATURES already has entries under the symlink
+#   path. Ruby treats these as different files and loads everything twice,
+#   causing "already initialized constant" warnings and fatal errors (duplicate
+#   enum definitions, duplicate callbacks, etc.).
+#
+#   Hard-copying eliminates this: a single physical path means no mismatch.
+#
+# Plugin loading at runtime:
 #   Discourse scans /app/plugins/*/plugin.rb (one directory, alphabetical order).
-#   The base image stores all bundled plugins at /container/data/discourse/plugins/.
-#   We replace /app/plugins with a symlink to that directory so Discourse sees
-#   ALL bundled plugins during precompilation. This also preserves the correct
-#   alphabetical load order from Discourse core (important: automation must load
-#   before discourse-assign because assign depends on automation's methods).
-#
-#   At runtime, Nfrastack's bootstrap replaces /app/plugins with a symlink to
-#   /data/plugins/, and plugin-tool sync creates per-plugin symlinks there
-#   based on PLUGIN_ENABLE_* env vars. Our build-time symlink is throwaway.
+#   At runtime, Nfrastack's bootstrap replaces /app/plugins and plugin-tool sync
+#   creates per-plugin symlinks from /app/plugins/<name> pointing to the source
+#   in /container/data/discourse/plugins/<name>, based on PLUGIN_ENABLE_* env
+#   vars. Per-plugin symlinks work fine because the symlink boundary is at the
+#   plugin directory level -- Dir[] and __dir__ stay consistent within each
+#   plugin's file tree.
 # =============================================================================
 
 ARG BASE_IMAGE=ghcr.io/nfrastack/container-discourse:latest
@@ -50,18 +61,21 @@ LABEL org.opencontainers.image.title="Discourse (AnkiMCP)" \
 # -----------------------------------------------------------------------------
 # Make all bundled plugins visible for asset precompilation
 # -----------------------------------------------------------------------------
-# Replace /app/plugins with a direct symlink to the bundled plugins directory.
-# This avoids double-loading (only one physical path) and preserves the correct
-# alphabetical load order from Discourse core:
-#   automation < discourse-assign  (assign depends on automation's methods)
+# Hard-copy bundled plugins from the Nfrastack staging area into /app/plugins.
+# We MUST NOT symlink here -- see the header comment for the full explanation
+# of the symlink/realpath double-loading bug.
 #
-# All bundled plugins will be compiled. At runtime, plugin-tool sync selectively
-# enables/disables plugins via PLUGIN_ENABLE_* env vars — the build-time
-# symlink is replaced by Nfrastack's bootstrap process.
+# cp -a preserves symlinks, permissions, and timestamps within each plugin
+# directory. The alphabetical load order is preserved (automation loads before
+# discourse-assign, which depends on automation's methods).
+#
+# At runtime, plugin-tool sync replaces these copies with per-plugin symlinks
+# based on PLUGIN_ENABLE_* env vars, so these build-time copies are throwaway.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
     rm -rf /app/plugins; \
-    ln -s /container/data/discourse/plugins /app/plugins; \
+    mkdir -p /app/plugins; \
+    cp -a /container/data/discourse/plugins/. /app/plugins/; \
     echo "=== Plugins visible for precompilation ==="; \
     ls -la /app/plugins/
 
@@ -112,9 +126,8 @@ RUN set -eux; \
 #                                   in the host-mounted /data/plugins/ volume.
 #                                   Ensures reproducible builds.
 # PLUGIN_ENABLE_*                 - Tell plugin-tool sync which plugins to enable
-#                                   at container startup. These match the symlinks
-#                                   we created above, but plugin-tool recreates
-#                                   them from scratch on init.
+#                                   at container startup. plugin-tool recreates
+#                                   per-plugin symlinks from scratch on init.
 ENV ENABLE_PRECOMPILE_ASSETS="FALSE" \
     ENABLE_DB_MIGRATE="TRUE" \
     SERVE_STATIC_ASSETS="TRUE" \
