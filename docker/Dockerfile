@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
 # Custom Discourse image for Kubernetes deployment
 # =============================================================================
@@ -131,7 +132,6 @@ set -e
 plugin-tool sync "$@"
 PLUGIN_ENABLED_PATH="${PLUGIN_ENABLED_PATH:-/app/plugins}"
 if [ -L "${PLUGIN_ENABLED_PATH}/assign" ]; then
-    target=$(readlink -f "${PLUGIN_ENABLED_PATH}/assign")
     mv "${PLUGIN_ENABLED_PATH}/assign" "${PLUGIN_ENABLED_PATH}/discourse-assign"
     echo "[plugin-tool-wrapper] Renamed assign -> discourse-assign (load order fix)"
 fi
