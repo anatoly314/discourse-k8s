@@ -114,21 +114,42 @@ RUN set -eux; \
     chown -R discourse:discourse /app/public/assets /app/tmp
 
 # -----------------------------------------------------------------------------
+# Fix plugin load order at runtime
+# -----------------------------------------------------------------------------
+# Nfrastack's plugin-tool normalizes names by stripping the "discourse-" prefix,
+# creating symlinks like /app/plugins/assign. Discourse loads plugins
+# alphabetically, so "assign" loads before "automation" — but assign depends
+# on automation's add_automation_scriptable method, causing a crash.
+#
+# Fix: override PLUGIN_TOOL_COMMAND with a wrapper that runs plugin-tool sync
+# and then renames affected symlinks to preserve the correct load order.
+# "discourse-assign" sorts after "automation" alphabetically.
+# -----------------------------------------------------------------------------
+COPY <<'SCRIPT' /usr/local/bin/plugin-tool-wrapper
+#!/bin/sh
+set -e
+plugin-tool sync "$@"
+PLUGIN_ENABLED_PATH="${PLUGIN_ENABLED_PATH:-/app/plugins}"
+if [ -L "${PLUGIN_ENABLED_PATH}/assign" ]; then
+    target=$(readlink -f "${PLUGIN_ENABLED_PATH}/assign")
+    mv "${PLUGIN_ENABLED_PATH}/assign" "${PLUGIN_ENABLED_PATH}/discourse-assign"
+    echo "[plugin-tool-wrapper] Renamed assign -> discourse-assign (load order fix)"
+fi
+SCRIPT
+RUN chmod +x /usr/local/bin/plugin-tool-wrapper
+
+# -----------------------------------------------------------------------------
 # Runtime configuration defaults
 # -----------------------------------------------------------------------------
+# PLUGIN_TOOL_COMMAND              - Override to use our wrapper that fixes
+#                                   plugin load order after plugin-tool sync.
 # ENABLE_PRECOMPILE_ASSETS=FALSE  - Assets are already compiled in this image.
-#                                   Skips the 5-15 min startup delay.
-# ENABLE_DB_MIGRATE=TRUE          - Run migrations on every deploy. Safe because
-#                                   Rails migrations are idempotent.
-# SERVE_STATIC_ASSETS=TRUE        - No nginx in front; Unicorn serves everything.
-#                                   Ingress controller handles TLS termination.
-# PLUGIN_PRIORITY=image            - Prefer image-bundled plugins over any found
-#                                   in the host-mounted /data/plugins/ volume.
-#                                   Ensures reproducible builds.
-# PLUGIN_ENABLE_*                 - Tell plugin-tool sync which plugins to enable
-#                                   at container startup. plugin-tool recreates
-#                                   per-plugin symlinks from scratch on init.
-ENV ENABLE_PRECOMPILE_ASSETS="FALSE" \
+# ENABLE_DB_MIGRATE=TRUE          - Run migrations on every deploy.
+# SERVE_STATIC_ASSETS=TRUE        - No nginx in front; Unicorn serves directly.
+# PLUGIN_PRIORITY=image            - Prefer image-bundled plugin versions.
+# PLUGIN_ENABLE_*                 - Tell plugin-tool sync which plugins to enable.
+ENV PLUGIN_TOOL_COMMAND="plugin-tool-wrapper" \
+    ENABLE_PRECOMPILE_ASSETS="FALSE" \
     ENABLE_DB_MIGRATE="TRUE" \
     SERVE_STATIC_ASSETS="TRUE" \
     PLUGIN_ENABLE_OPENID_CONNECT="TRUE" \
