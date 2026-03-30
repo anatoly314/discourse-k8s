@@ -78,8 +78,9 @@ jobs:
           push: ${{ steps.version.outputs.is_release == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            DISCOURSE_VERSION=${{ steps.version.outputs.value || 'dev' }}
+          # DISCOURSE_VERSION is pinned in the Dockerfile (e.g., v2026.3.0-latest).
+          # Our docker/v* tags version the IMAGE, not Discourse itself.
+          # Only override DISCOURSE_VERSION if you need a different Discourse release.
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
