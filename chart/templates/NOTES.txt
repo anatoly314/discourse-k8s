@@ -20,6 +20,11 @@
   Database host: {{ .Values.discourse.database.host | default "<NOT SET>" }}
   Redis:         {{ .Values.discourse.redis.host }}:{{ .Values.discourse.redis.port }}
 
+  Architecture:
+    web      -- pitchfork web server (port 3000, {{ .Values.discourse.unicornWorkers }} workers)
+    sidekiq  -- background jobs (concurrency {{ .Values.discourse.sidekiqConcurrency }})
+    redis    -- sidecar cache/queue (ephemeral)
+
 {{- if .Values.ingress.enabled }}
 
   Access your forum at:
@@ -39,19 +44,19 @@
 
   FIRST BOOT NOTES:
   -----------------
-  * First startup can take 5-10 minutes while database migrations run.
-  * The startup probe allows up to ~10 minutes before marking the pod as failed.
-  * Monitor progress with:
+  * The migrate init container runs database migrations before the app starts.
+  * First startup may take a few minutes while migrations complete.
+  * Monitor migration progress with:
 
-      kubectl logs -f deploy/{{ include "discourse.fullname" . }} -c discourse -n {{ .Release.Namespace }}
+      kubectl logs deploy/{{ include "discourse.fullname" . }} -c migrate -n {{ .Release.Namespace }}
 
-{{- if .Values.discourse.admin.email }}
+  * Monitor the web server with:
 
-  Admin account will be created on first boot:
-    Username: {{ .Values.discourse.admin.username }}
-    Email:    {{ .Values.discourse.admin.email }}
+      kubectl logs -f deploy/{{ include "discourse.fullname" . }} -c web -n {{ .Release.Namespace }}
 
-{{- end }}
+  * Monitor background jobs with:
+
+      kubectl logs -f deploy/{{ include "discourse.fullname" . }} -c sidekiq -n {{ .Release.Namespace }}
 
 {{- if .Values.discourse.developerEmails }}
 

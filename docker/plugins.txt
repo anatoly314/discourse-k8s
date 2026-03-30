@@ -1,40 +1,32 @@
 # =============================================================================
-# Discourse plugin reference list
+# Discourse plugins reference
 # =============================================================================
 #
-# This file is NOT consumed by the Dockerfile build. It exists as documentation
-# and as a reference for plugin-tool if you ever need to install a specific
-# version from git (e.g., plugin-tool install <url>).
+# As of Discourse v2026.x, ALL plugins we need ship with core in the plugins/
+# directory. No third-party cloning is required. This file is documentation
+# only — it is not consumed by the Dockerfile.
 #
-# The Dockerfile enables bundled plugins via symlinks from
-# /container/data/discourse/plugins/ -- it does not clone anything from git.
-#
-# Name corrections from CLAUDE.md original spec:
-#   - "discourse-voting"  -> actual plugin is "discourse-topic-voting"
-#   - "discourse-polls"   -> core directory is "poll" (singular, no prefix)
-#   - "discourse-chat"    -> core directory is "chat" (no prefix)
-#   - "discourse-automation" -> core directory is "automation" (no prefix)
+# Plugins are present in the image but disabled by default. Enable them via
+# the admin UI at /admin/plugins or via site settings API.
 # =============================================================================
 
-# --- SSO / Authentication ---
-https://github.com/discourse/discourse-openid-connect.git    # Keycloak SSO via OIDC (discovery, PKCE, RP-initiated logout)
+# --- Plugins we use (all bundled with Discourse core) ---
+#
+# plugins/discourse-openid-connect   # Keycloak SSO via OIDC (discovery, PKCE, RP-initiated logout)
+# plugins/discourse-topic-voting     # Category-level feature voting with vote pools
+# plugins/discourse-solved           # Mark replies as accepted solutions
+# plugins/discourse-assign           # Assign topics/posts to staff members
+# plugins/discourse-ai               # AI features (summarize, classify, embeddings)
+# plugins/discourse-reactions        # Post reactions beyond simple likes
+# plugins/automation                 # Automate actions via triggers and scripts
+# plugins/chat                       # Real-time chat channels, DMs, threads
+# plugins/poll                       # Create polls in posts
+# plugins/checklist                  # Checkbox lists in posts
+# plugins/discourse-details          # Collapsible detail/summary blocks
+# plugins/discourse-narrative-bot    # New user tutorial bot
+# plugins/discourse-presence         # "user is typing" indicators
+# plugins/styleguide                 # Admin style guide for theming
 
-# --- Community features ---
-https://github.com/discourse/discourse-topic-voting.git      # Category-level feature voting with vote pools
-https://github.com/discourse/discourse-solved.git             # Mark replies as accepted solutions
-https://github.com/discourse/discourse-assign.git             # Assign topics/posts to staff members
-https://github.com/discourse/discourse-reactions.git          # Post reactions beyond simple likes
-
-# --- AI ---
-https://github.com/discourse/discourse-ai.git                # AI-powered features (summarize, classify, embeddings)
-
-# --- Bundled core plugins (ship with Discourse, no separate repo) ---
-# These live inside the main discourse/discourse repo under plugins/:
-#   plugins/chat                    # Real-time chat channels, DMs, threads
-#   plugins/automation              # Automate actions via triggers and scripts
-#   plugins/poll                    # Create polls in posts
-#   plugins/checklist               # Checkbox lists in posts
-#   plugins/discourse-details       # Collapsible detail/summary blocks
-#   plugins/discourse-narrative-bot # New user tutorial bot
-#   plugins/discourse-presence      # "user is typing" indicators
-#   plugins/styleguide              # Admin style guide for theming
+# --- If a future plugin is NOT in core, add it to the Dockerfile: ---
+# RUN cd plugins && \
+#     sudo -u discourse git clone --depth 1 https://github.com/org/plugin-name.git

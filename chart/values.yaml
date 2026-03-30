@@ -1,15 +1,16 @@
 # =============================================================================
-# Discourse Helm Chart — values.yaml
+# Discourse Helm Chart -- values.yaml
 # =============================================================================
-# Deploys Discourse on Kubernetes using the Nfrastack base image with a Redis
-# sidecar. See CLAUDE.md and .docs/specifications.md for architecture details.
+# Deploys Discourse on Kubernetes using a slim-based custom image with separate
+# Unicorn and Sidekiq containers plus a Redis sidecar.
+# See CLAUDE.md for architecture details.
 # =============================================================================
 
 # ---------------------------------------------------------------------------
 # Discourse container image
 # ---------------------------------------------------------------------------
 # You MUST set image.repository to your custom-built Discourse image
-# (extends ghcr.io/nfrastack/container-discourse with baked-in plugins).
+# (extends discourse/base:slim with baked-in plugins and precompiled assets).
 # If tag is empty, defaults to Chart.appVersion.
 image:
   repository: ""
@@ -25,7 +26,7 @@ fullnameOverride: ""
 # Redis sidecar
 # ---------------------------------------------------------------------------
 # Ephemeral Redis in the same pod (no PVC). Used for Sidekiq job queue,
-# caching, and MessageBus. NOT a data store — PostgreSQL is the source
+# caching, and MessageBus. NOT a data store -- PostgreSQL is the source
 # of truth.
 redis:
   image:
@@ -43,10 +44,10 @@ redis:
 # Discourse configuration
 # ---------------------------------------------------------------------------
 discourse:
-  # REQUIRED — the public hostname for the forum (e.g. forum.example.com)
+  # REQUIRED -- the public hostname for the forum (e.g. forum.example.com)
   hostname: ""
 
-  # REQUIRED for first boot — comma-separated emails that get initial admin
+  # REQUIRED for first boot -- comma-separated emails that get initial admin
   developerEmails: ""
 
   # -- Admin account (first boot only) --
@@ -79,7 +80,6 @@ discourse:
   redis:
     host: localhost
     port: 6379
-    db: 0
 
   # -- SMTP --
   smtp:
@@ -107,47 +107,40 @@ discourse:
   # -- Serving --
   # Serve static assets directly from Unicorn (no nginx in front)
   serveStaticAssets: true
-  # Force HTTPS — maps to DELIVER_SECURE_ASSETS in Nfrastack
+  # Force HTTPS -- sets DISCOURSE_FORCE_HTTPS=true
   forceHttps: true
 
   # -- Performance tuning --
-  unicornWorkers: 4
-  sidekiqThreads: 5
-
-  # -- Startup behavior --
-  # Run database migrations on startup (recommended)
-  enableDbMigrate: true
-  # Precompile assets on startup — leave false, bake into Docker image instead
-  enablePrecompileAssets: false
-
-  # NOTE: Nfrastack hardcodes Rails logging to a file, not stdout.
-  # Use LOG_PATH/LOG_FILE env vars or a log-tailing sidecar if you need
-  # kubectl logs for Rails output. RAILS_LOG_TO_STDOUT is silently ignored.
-
-  # -- Plugins --
-  # Enable/disable plugins bundled in the image. Keys are plugin short names,
-  # values are booleans. Maps to PLUGIN_ENABLE_<UPPER_NAME>=TRUE|FALSE.
-  # Example:
-  #   plugins:
-  #     openid-connect: true
-  #     solved: true
-  #     chat: true
-  #     ai: false
-  plugins: {}
+  # Number of Unicorn worker processes (Discourse default: 3)
+  unicornWorkers: 3
+  # Sidekiq concurrency (number of threads processing background jobs)
+  sidekiqConcurrency: 5
 
   # -- Extra environment variables --
-  # Passed directly to the Discourse container. Use for any env vars not
-  # covered above.
+  # Passed directly to all Discourse containers (unicorn, sidekiq, migrate).
+  # Use for any env vars not covered above.
   # Example:
   #   extraEnv:
-  #     - name: TIMEZONE
-  #       value: "UTC"
   #     - name: DISCOURSE_S3_BUCKET
+  #       value: "my-bucket"
+  #     - name: DISCOURSE_S3_SECRET_ACCESS_KEY
   #       valueFrom:
   #         secretKeyRef:
   #           name: my-secret
-  #           key: s3-bucket
+  #           key: s3-secret
   extraEnv: []
+
+# ---------------------------------------------------------------------------
+# Sidekiq container resources
+# ---------------------------------------------------------------------------
+# Separate resource configuration for the Sidekiq container.
+sidekiq:
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
 
 # ---------------------------------------------------------------------------
 # Init containers
@@ -163,8 +156,9 @@ initContainers:
 # ---------------------------------------------------------------------------
 # Persistent storage
 # ---------------------------------------------------------------------------
+# Mount paths use standard Discourse layout under /var/www/discourse.
 persistence:
-  # User uploads, avatars, attachments — mounted at /data/uploads
+  # User uploads, avatars, attachments
   uploads:
     enabled: true
     size: 10Gi
@@ -172,8 +166,10 @@ persistence:
     accessModes:
       - ReadWriteOnce
     existingClaim: ""
+    # Mount path inside the container
+    mountPath: /var/www/discourse/public/uploads
 
-  # Database backup archives — mounted at /data/backups
+  # Database backup archives
   backups:
     enabled: false
     size: 10Gi
@@ -181,6 +177,8 @@ persistence:
     accessModes:
       - ReadWriteOnce
     existingClaim: ""
+    # Mount path inside the container
+    mountPath: /var/www/discourse/public/backups
 
 # ---------------------------------------------------------------------------
 # Service
@@ -213,7 +211,7 @@ ingress:
   tls: []
 
 # ---------------------------------------------------------------------------
-# Discourse container resources
+# Unicorn container resources
 # ---------------------------------------------------------------------------
 resources:
   requests:
@@ -243,10 +241,6 @@ affinity: {}
 podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}
-
-# NOTE: The Discourse container starts as root for s6-overlay init, then
-# drops privileges to the discourse user (uid 9009). Do NOT set runAsNonRoot
-# or drop ALL capabilities — it will break the s6-overlay init process.
 securityContext: {}
 
 restartPolicy: Always

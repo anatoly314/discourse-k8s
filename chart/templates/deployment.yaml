@@ -39,128 +39,16 @@ spec:
       restartPolicy: {{ .Values.restartPolicy }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
 
-      {{- if .Values.initContainers.waitForPostgres.enabled }}
       initContainers:
-        - name: wait-for-postgres
-          image: "{{ .Values.initContainers.waitForPostgres.image.repository }}:{{ .Values.initContainers.waitForPostgres.image.tag }}"
-          imagePullPolicy: {{ .Values.initContainers.waitForPostgres.image.pullPolicy }}
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for PostgreSQL at ${DB_HOST}:${DB_PORT}..."
-              until nc -z "${DB_HOST}" "${DB_PORT}"; do
-                echo "PostgreSQL not ready, retrying in 2s..."
-                sleep 2
-              done
-              echo "PostgreSQL is reachable."
-          env:
-            - name: DB_HOST
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "discourse.configmapName" . }}
-                  key: DB_HOST
-            - name: DB_PORT
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "discourse.configmapName" . }}
-                  key: DB_PORT
-      {{- end }}
-
-      containers:
-        # ---- Discourse (Unicorn + Sidekiq via s6-overlay) ----
-        - name: discourse
-          image: {{ include "discourse.image" . }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: 3000
-              protocol: TCP
-          envFrom:
-            - configMapRef:
-                name: {{ include "discourse.configmapName" . }}
-          env:
-            # -- Database password --
-            {{- if or .Values.discourse.database.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.database.password) }}
-            - name: DB_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ default (include "discourse.secretName" .) .Values.discourse.database.existingSecret }}
-                  key: {{ .Values.discourse.database.secretKey }}
-            {{- end }}
-            # -- SMTP password --
-            {{- if or .Values.discourse.smtp.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.smtp.password) }}
-            - name: SMTP_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ default (include "discourse.secretName" .) .Values.discourse.smtp.existingSecret }}
-                  key: {{ .Values.discourse.smtp.secretKey }}
-            {{- end }}
-            # -- Secret key base --
-            {{- if or .Values.discourse.secretKeyBase.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.secretKeyBase.value) }}
-            - name: DISCOURSE_SECRET_KEY_BASE
-              valueFrom:
-                secretKeyRef:
-                  name: {{ default (include "discourse.secretName" .) .Values.discourse.secretKeyBase.existingSecret }}
-                  key: {{ .Values.discourse.secretKeyBase.secretKey }}
-            {{- end }}
-            # -- Admin password --
-            {{- if or .Values.discourse.admin.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.admin.password) }}
-            - name: ADMIN_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ default (include "discourse.secretName" .) .Values.discourse.admin.existingSecret }}
-                  key: {{ .Values.discourse.admin.secretKey }}
-            {{- end }}
-            {{- with .Values.discourse.extraEnv }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
-          startupProbe:
-            httpGet:
-              path: /srv/status
-              port: http
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 60
-          livenessProbe:
-            httpGet:
-              path: /srv/status
-              port: http
-            initialDelaySeconds: 0
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /srv/status
-              port: http
-            initialDelaySeconds: 0
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          volumeMounts:
-            {{- if .Values.persistence.uploads.enabled }}
-            - name: uploads
-              mountPath: /data/uploads
-            {{- end }}
-            {{- if .Values.persistence.backups.enabled }}
-            - name: backups
-              mountPath: /data/backups
-            {{- end }}
-          {{- with .Values.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.securityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-
-        # ---- Redis sidecar (ephemeral, no PVC) ----
+        # ---- Redis (native sidecar, K8s 1.28+) ----
+        # restartPolicy: Always makes this a "sidecar" init container:
+        # it starts BEFORE other init containers and keeps running alongside
+        # regular containers. This ensures Redis is available for migrations
+        # (Discourse's db:migrate acquires a distributed mutex via Redis).
         - name: redis
           image: {{ include "discourse.redisImage" . }}
           imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          restartPolicy: Always
           ports:
             - name: redis
               containerPort: 6379
@@ -193,6 +81,164 @@ spec:
             allowPrivilegeEscalation: false
           {{- with .Values.redis.resources }}
           resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+        {{- if .Values.initContainers.waitForPostgres.enabled }}
+        # ---- Wait for PostgreSQL to be reachable ----
+        - name: wait-for-postgres
+          image: "{{ .Values.initContainers.waitForPostgres.image.repository }}:{{ .Values.initContainers.waitForPostgres.image.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.waitForPostgres.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for PostgreSQL at ${DISCOURSE_DB_HOST}:${DISCOURSE_DB_PORT}..."
+              until nc -z "${DISCOURSE_DB_HOST}" "${DISCOURSE_DB_PORT}"; do
+                echo "PostgreSQL not ready, retrying in 2s..."
+                sleep 2
+              done
+              echo "PostgreSQL is reachable."
+          env:
+            - name: DISCOURSE_DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "discourse.configmapName" . }}
+                  key: DISCOURSE_DB_HOST
+            - name: DISCOURSE_DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "discourse.configmapName" . }}
+                  key: DISCOURSE_DB_PORT
+        {{- end }}
+
+        # ---- Run database migrations ----
+        - name: migrate
+          image: {{ include "discourse.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["bundle", "exec", "rake", "db:migrate"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "discourse.configmapName" . }}
+          {{- if include "discourse.hasEnvVars" . }}
+          env:
+            {{- include "discourse.secretEnvVars" . | nindent 12 }}
+            {{- with .Values.discourse.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+
+      containers:
+        # ---- Pitchfork web server (Discourse's unicorn successor, port 3000) ----
+        - name: web
+          image: {{ include "discourse.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["bundle", "exec", "pitchfork", "-E", "production", "-c", "config/pitchfork.conf.rb"]
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "discourse.configmapName" . }}
+          {{- if include "discourse.hasEnvVars" . }}
+          env:
+            {{- include "discourse.secretEnvVars" . | nindent 12 }}
+            {{- with .Values.discourse.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /srv/status
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /srv/status
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /srv/status
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            {{- if .Values.persistence.uploads.enabled }}
+            - name: uploads
+              mountPath: {{ .Values.persistence.uploads.mountPath }}
+            {{- end }}
+            {{- if .Values.persistence.backups.enabled }}
+            - name: backups
+              mountPath: {{ .Values.persistence.backups.mountPath }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+        # ---- Sidekiq (background job processor) ----
+        - name: sidekiq
+          image: {{ include "discourse.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: {{ include "discourse.sidekiqCommand" . }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "discourse.configmapName" . }}
+          {{- if include "discourse.hasEnvVars" . }}
+          env:
+            {{- include "discourse.secretEnvVars" . | nindent 12 }}
+            {{- with .Values.discourse.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          startupProbe:
+            exec:
+              command: ["pgrep", "-f", "sidekiq"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "sidekiq"]
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["pgrep", "-f", "sidekiq"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            {{- if .Values.persistence.uploads.enabled }}
+            - name: uploads
+              mountPath: {{ .Values.persistence.uploads.mountPath }}
+            {{- end }}
+            {{- if .Values.persistence.backups.enabled }}
+            - name: backups
+              mountPath: {{ .Values.persistence.backups.mountPath }}
+            {{- end }}
+          {{- with .Values.sidekiq.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
 

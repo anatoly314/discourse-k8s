@@ -1,171 +1,137 @@
 # syntax=docker/dockerfile:1
 # =============================================================================
-# Custom Discourse image for Kubernetes deployment
+# Discourse for Kubernetes
 # =============================================================================
 #
-# Extends the Nfrastack base image to:
-#   1. Copy bundled plugins into /app/plugins at build time
-#   2. Precompile assets so pods start in seconds, not 5-15 minutes
+# A clean, single-purpose image for running Discourse on Kubernetes.
+# Uses discourse/base:slim as the foundation (Ruby, Node, pnpm, ImageMagick,
+# pg_client — everything needed to run a Rails app, without bundled PG/Redis).
+#
+# The same image serves three roles via different CMD/entrypoint overrides:
+#   - Web server:  bundle exec pitchfork -E production -c config/pitchfork.conf.rb
+#   - Sidekiq:     bundle exec sidekiq
+#   - Migrations:  bundle exec rake db:migrate
 #
 # Build:
-#   docker build -t discourse-custom:dev .
-#   docker build --build-arg BASE_IMAGE=ghcr.io/nfrastack/container-discourse:latest \
-#                -t discourse-custom:dev .
+#   docker build -t discourse:latest .
+#   docker build --build-arg DISCOURSE_VERSION=v2026.3.0-latest -t discourse:v2026.3.0 .
 #
-# Why this file exists:
-#   Discourse plugins contribute JS/CSS to the compiled asset bundle. If plugins
-#   aren't present when `rake assets:precompile` runs, they're invisible to the
-#   frontend. The Nfrastack base image ships all bundled Discourse plugins under
-#   /container/data/discourse/plugins/ but doesn't precompile assets. We hard-copy
-#   them into /app/plugins and precompile so the image is ready to serve.
-#
-# Why hard-copy instead of symlink:
-#   Symlinking /app/plugins -> /container/data/discourse/plugins/ causes Ruby to
-#   double-load every plugin file due to a symlink/realpath mismatch. Several
-#   Discourse plugins (automation, chat, reactions, etc.) use Rails::Engine
-#   subclasses. When the engine file is loaded via require_relative from a
-#   symlink path, __dir__ inside the engine resolves to the real (target) path,
-#   not the symlink path. The engine then registers autoload_paths using the
-#   real path, while $LOADED_FEATURES already has entries under the symlink
-#   path. Ruby treats these as different files and loads everything twice,
-#   causing "already initialized constant" warnings and fatal errors (duplicate
-#   enum definitions, duplicate callbacks, etc.).
-#
-#   Hard-copying eliminates this: a single physical path means no mismatch.
-#
-# Plugin loading at runtime:
-#   Discourse scans /app/plugins/*/plugin.rb (one directory, alphabetical order).
-#   At runtime, Nfrastack's bootstrap replaces /app/plugins and plugin-tool sync
-#   creates per-plugin symlinks from /app/plugins/<name> pointing to the source
-#   in /container/data/discourse/plugins/<name>, based on PLUGIN_ENABLE_* env
-#   vars. Per-plugin symlinks work fine because the symlink boundary is at the
-#   plugin directory level -- Dir[] and __dir__ stay consistent within each
-#   plugin's file tree.
 # =============================================================================
 
-ARG BASE_IMAGE=ghcr.io/nfrastack/container-discourse:latest
+ARG BASE_IMAGE=discourse/base:slim
 
 FROM ${BASE_IMAGE}
 
-# Re-declare ARGs after FROM so they're available for labels and RUN commands.
-# ARG values don't survive across FROM boundaries in multi-stage builds.
+# Re-declare after FROM so they're available in RUN and LABEL instructions.
 ARG BASE_IMAGE
-ARG DISCOURSE_VERSION=v2026.2.1
+ARG DISCOURSE_VERSION=v2026.3.0-latest
 
 LABEL org.opencontainers.image.title="Discourse (AnkiMCP)" \
-      org.opencontainers.image.description="Discourse forum with plugins pre-enabled and assets precompiled for Kubernetes" \
+      org.opencontainers.image.description="Discourse forum with plugins and precompiled assets for Kubernetes" \
       org.opencontainers.image.version="${DISCOURSE_VERSION}" \
       org.opencontainers.image.source="https://github.com/anatoly314/discourse-k8s" \
       org.opencontainers.image.base.name="${BASE_IMAGE}" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="GPL-2.0-only"
 
-# -----------------------------------------------------------------------------
-# Make all bundled plugins visible for asset precompilation
-# -----------------------------------------------------------------------------
-# Hard-copy bundled plugins from the Nfrastack staging area into /app/plugins.
-# We MUST NOT symlink here -- see the header comment for the full explanation
-# of the symlink/realpath double-loading bug.
-#
-# cp -a preserves symlinks, permissions, and timestamps within each plugin
-# directory. The alphabetical load order is preserved (automation loads before
-# discourse-assign, which depends on automation's methods).
-#
-# At runtime, plugin-tool sync replaces these copies with per-plugin symlinks
-# based on PLUGIN_ENABLE_* env vars, so these build-time copies are throwaway.
-# -----------------------------------------------------------------------------
-RUN set -eux; \
-    rm -rf /app/plugins; \
-    mkdir -p /app/plugins; \
-    cp -a /container/data/discourse/plugins/. /app/plugins/; \
-    echo "=== Plugins visible for precompilation ==="; \
-    ls -la /app/plugins/
+# =============================================================================
+# Pin Discourse to the requested version
+# =============================================================================
+# The slim base image clones Discourse from the main branch into
+# /var/www/discourse. We fetch the specific release tag and check it out.
+# Using --filter=tree:0 (partial clone) means git fetch is lightweight.
+# =============================================================================
+WORKDIR /var/www/discourse
 
-# -----------------------------------------------------------------------------
-# Stage 2: Precompile assets
-# -----------------------------------------------------------------------------
-# This is the expensive step (~5-15 min) that we pay once at build time instead
-# of on every pod startup.
-#
-# Key env vars:
-#   RAILS_ENV=production        - Required for production asset compilation
-#   SKIP_DB_AND_REDIS=1         - Tells Discourse to skip DB/Redis connections.
-#                                 CSS theme compilation needs DB so it's skipped;
-#                                 JS/Ember compiles fine without it. Theme CSS
-#                                 gets compiled lazily at runtime on first request.
-#   SECRET_KEY_BASE             - Rails refuses to boot in production mode without
-#                                 one. We use a throwaway value that never leaves
-#                                 the build layer. The real secret is injected at
-#                                 runtime via DISCOURSE_SECRET_KEY_BASE.
-# -----------------------------------------------------------------------------
-RUN set -eux; \
-    \
-    export RAILS_ENV=production; \
-    export SKIP_DB_AND_REDIS=1; \
-    export SECRET_KEY_BASE="precompile_placeholder_$(openssl rand -hex 32)"; \
-    export DISCOURSE_SECRET_KEY_BASE="${SECRET_KEY_BASE}"; \
-    \
-    # Git safe.directory is needed because /app is owned by discourse (UID 9009)
-    # but we're running as root during build. Discourse's asset pipeline shells
-    # out to git for version info.
-    git config --global --add safe.directory /app; \
-    \
-    cd /app && bundle exec rake assets:precompile; \
-    \
-    # Ensure the discourse user owns compiled assets and tmp files
-    chown -R discourse:discourse /app/public/assets /app/tmp
+RUN sudo -u discourse git fetch --depth 1 origin tag "${DISCOURSE_VERSION}" && \
+    sudo -u discourse git checkout "${DISCOURSE_VERSION}"
 
-# -----------------------------------------------------------------------------
-# Fix plugin load order at runtime
-# -----------------------------------------------------------------------------
-# Nfrastack's plugin-tool normalizes names by stripping the "discourse-" prefix,
-# creating symlinks like /app/plugins/assign. Discourse loads plugins
-# alphabetically, so "assign" loads before "automation" — but assign depends
-# on automation's add_automation_scriptable method, causing a crash.
-#
-# Fix: override PLUGIN_TOOL_COMMAND with a wrapper that runs plugin-tool sync
-# and then renames affected symlinks to preserve the correct load order.
-# "discourse-assign" sorts after "automation" alphabetically.
-# -----------------------------------------------------------------------------
-COPY <<'SCRIPT' /usr/local/bin/plugin-tool-wrapper
-#!/bin/sh
-set -e
-plugin-tool sync "$@"
-PLUGIN_ENABLED_PATH="${PLUGIN_ENABLED_PATH:-/app/plugins}"
-if [ -L "${PLUGIN_ENABLED_PATH}/assign" ]; then
-    mv "${PLUGIN_ENABLED_PATH}/assign" "${PLUGIN_ENABLED_PATH}/discourse-assign"
-    echo "[plugin-tool-wrapper] Renamed assign -> discourse-assign (load order fix)"
-fi
-SCRIPT
-RUN chmod +x /usr/local/bin/plugin-tool-wrapper
+# =============================================================================
+# Install Ruby gems
+# =============================================================================
+# Mirrors the web-only stage from discourse/discourse_docker.
+# --deployment: uses exact Gemfile.lock versions, installs to vendor/bundle.
+# --without test development: skip test/dev-only gems.
+# =============================================================================
+RUN sudo -u discourse bundle config --local deployment true && \
+    sudo -u discourse bundle config --local path ./vendor/bundle && \
+    sudo -u discourse bundle config --local without "test development" && \
+    sudo -u discourse bundle install --jobs "$(( $(nproc) - 1 ))" && \
+    find vendor/bundle -name cache -not -path '*/gems/*' -type d -exec rm -rf {} + 2>/dev/null; \
+    find vendor/bundle -name tmp -type d -exec rm -rf {} + 2>/dev/null; \
+    true
 
-# -----------------------------------------------------------------------------
-# Runtime configuration defaults
-# -----------------------------------------------------------------------------
-# PLUGIN_TOOL_COMMAND              - Override to use our wrapper that fixes
-#                                   plugin load order after plugin-tool sync.
-# ENABLE_PRECOMPILE_ASSETS=FALSE  - Assets are already compiled in this image.
-# ENABLE_DB_MIGRATE=TRUE          - Run migrations on every deploy.
-# SERVE_STATIC_ASSETS=TRUE        - No nginx in front; Unicorn serves directly.
-# PLUGIN_PRIORITY=image            - Prefer image-bundled plugin versions.
-# PLUGIN_ENABLE_*                 - Tell plugin-tool sync which plugins to enable.
-ENV PLUGIN_TOOL_COMMAND="plugin-tool-wrapper" \
-    ENABLE_PRECOMPILE_ASSETS="FALSE" \
-    ENABLE_DB_MIGRATE="TRUE" \
-    SERVE_STATIC_ASSETS="TRUE" \
-    PLUGIN_ENABLE_OPENID_CONNECT="TRUE" \
-    PLUGIN_ENABLE_TOPIC_VOTING="TRUE" \
-    PLUGIN_ENABLE_CHAT="TRUE" \
-    PLUGIN_ENABLE_SOLVED="TRUE" \
-    PLUGIN_ENABLE_AI="TRUE" \
-    PLUGIN_ENABLE_ASSIGN="TRUE" \
-    PLUGIN_ENABLE_AUTOMATION="TRUE" \
-    PLUGIN_ENABLE_POLL="TRUE" \
-    PLUGIN_ENABLE_CHECKLIST="TRUE" \
-    PLUGIN_ENABLE_DETAILS="TRUE" \
-    PLUGIN_ENABLE_NARRATIVE_BOT="TRUE" \
-    PLUGIN_ENABLE_PRESENCE="TRUE" \
-    PLUGIN_ENABLE_REACTIONS="TRUE" \
-    PLUGIN_ENABLE_STYLEGUIDE="TRUE" \
-    PLUGIN_PRIORITY="image"
+# =============================================================================
+# Install JavaScript dependencies
+# =============================================================================
+# Discourse migrated from yarn to pnpm. We handle both for forward compat.
+# =============================================================================
+RUN sudo -u discourse /bin/bash -c \
+    'if [ -f yarn.lock ]; then yarn install --frozen-lockfile && yarn cache clean; else pnpm install --frozen-lockfile; fi'
+
+# =============================================================================
+# Plugins
+# =============================================================================
+# All plugins we need (openid-connect, topic-voting, solved, assign, ai,
+# reactions, chat, automation, poll, etc.) ship in Discourse core under
+# plugins/. No third-party plugin cloning needed.
+#
+# If you ever need a plugin that's NOT in core, add a git clone here:
+#   RUN cd plugins && \
+#       sudo -u discourse git clone --depth 1 https://github.com/org/plugin.git
+#
+# Plugins MUST be present before assets:precompile — they contribute JS/CSS
+# to the compiled Ember bundle. They are enabled/disabled via the admin UI.
+# =============================================================================
+
+# =============================================================================
+# Precompile assets
+# =============================================================================
+# This is the expensive step (~5-15 min) that we pay once at image build time
+# instead of on every pod startup.
+#
+# SKIP_DB_AND_REDIS=1   — Discourse skips DB/Redis connections during compile.
+#                         CSS theme compilation needs DB so it's deferred to
+#                         runtime; JS/Ember compiles fine without it.
+# SECRET_KEY_BASE       — Rails refuses to boot in production without one.
+#                         This throwaway value never leaves the build layer.
+#                         The real secret is injected at runtime via
+#                         DISCOURSE_SECRET_KEY_BASE.
+# DISCOURSE_MAXMIND_LICENSE_KEY — set to empty to skip MaxMind DB download
+#                         during precompile (default behavior tries to fetch it).
+# =============================================================================
+RUN sudo -u discourse env \
+    RAILS_ENV=production \
+    SKIP_DB_AND_REDIS=1 \
+    SECRET_KEY_BASE="precompile_placeholder_$(openssl rand -hex 32)" \
+    DISCOURSE_MAXMIND_LICENSE_KEY="" \
+    bundle exec rake assets:precompile
+
+# =============================================================================
+# Runtime environment defaults
+# =============================================================================
+# UNICORN_SIDEKIQS=0        — Do NOT spawn Sidekiq from the web server process.
+#                             Sidekiq runs as a separate K8s container.
+# UNICORN_BIND_ALL=true     — Listen on 0.0.0.0 instead of 127.0.0.1.
+#                             Required inside a container/pod.
+# UNICORN_WORKERS=3         — Sane default for ~1GB RAM pod. Override via Helm.
+# DISCOURSE_SERVE_STATIC_ASSETS=true
+#                           — No nginx in front; pitchfork serves assets directly.
+# =============================================================================
+ENV RAILS_ENV=production \
+    UNICORN_SIDEKIQS=0 \
+    UNICORN_BIND_ALL=true \
+    UNICORN_WORKERS=3 \
+    DISCOURSE_SERVE_STATIC_ASSETS=true
 
 EXPOSE 3000
+
+# Drop from root to the discourse user. Build steps above use sudo -u discourse
+# for file operations; at runtime there's no reason to stay root.
+USER discourse
+
+# Default: run the web server (pitchfork, Discourse's unicorn successor).
+# Override in K8s to run Sidekiq or one-off tasks.
+#
+# Discourse's bin/unicorn auto-delegates to bin/pitchfork unless RUN_PITCHFORK=0.
+# We call pitchfork directly to be explicit.
+CMD ["bundle", "exec", "pitchfork", "-E", "production", "-c", "config/pitchfork.conf.rb"]

@@ -6,65 +6,47 @@ metadata:
     {{- include "discourse.labels" . | nindent 4 }}
 data:
   # -- Site identity --
-  SITE_HOSTNAME: {{ required "discourse.hostname is required" .Values.discourse.hostname | quote }}
+  DISCOURSE_HOSTNAME: {{ required "discourse.hostname is required" .Values.discourse.hostname | quote }}
   {{- if .Values.discourse.developerEmails }}
-  DEVELOPER_EMAILS: {{ .Values.discourse.developerEmails | quote }}
+  DISCOURSE_DEVELOPER_EMAILS: {{ .Values.discourse.developerEmails | quote }}
   {{- end }}
 
   # -- Database --
-  DB_HOST: {{ required "discourse.database.host is required" .Values.discourse.database.host | quote }}
-  DB_PORT: {{ .Values.discourse.database.port | quote }}
-  DB_NAME: {{ .Values.discourse.database.name | quote }}
-  DB_USER: {{ .Values.discourse.database.username | quote }}
-  DB_POOL: {{ .Values.discourse.database.pool | quote }}
+  DISCOURSE_DB_HOST: {{ required "discourse.database.host is required" .Values.discourse.database.host | quote }}
+  DISCOURSE_DB_PORT: {{ .Values.discourse.database.port | quote }}
+  DISCOURSE_DB_NAME: {{ .Values.discourse.database.name | quote }}
+  DISCOURSE_DB_USERNAME: {{ .Values.discourse.database.username | quote }}
+  DISCOURSE_DB_POOL: {{ .Values.discourse.database.pool | quote }}
 
   # -- Redis --
-  REDIS_HOST: {{ .Values.discourse.redis.host | quote }}
-  REDIS_PORT: {{ .Values.discourse.redis.port | quote }}
-  REDIS_DB: {{ .Values.discourse.redis.db | quote }}
+  DISCOURSE_REDIS_HOST: {{ .Values.discourse.redis.host | quote }}
+  DISCOURSE_REDIS_PORT: {{ .Values.discourse.redis.port | quote }}
 
   # -- SMTP --
   {{- if .Values.discourse.smtp.address }}
-  SMTP_HOST: {{ .Values.discourse.smtp.address | quote }}
+  DISCOURSE_SMTP_ADDRESS: {{ .Values.discourse.smtp.address | quote }}
   {{- end }}
   {{- if .Values.discourse.smtp.port }}
-  SMTP_PORT: {{ .Values.discourse.smtp.port | quote }}
+  DISCOURSE_SMTP_PORT: {{ .Values.discourse.smtp.port | quote }}
   {{- end }}
   {{- if .Values.discourse.smtp.domain }}
-  SMTP_DOMAIN: {{ .Values.discourse.smtp.domain | quote }}
+  DISCOURSE_SMTP_DOMAIN: {{ .Values.discourse.smtp.domain | quote }}
   {{- end }}
   {{- if .Values.discourse.smtp.username }}
-  SMTP_USER: {{ .Values.discourse.smtp.username | quote }}
+  DISCOURSE_SMTP_USER_NAME: {{ .Values.discourse.smtp.username | quote }}
   {{- end }}
   {{- if .Values.discourse.smtp.authentication }}
-  SMTP_AUTHENTICATION: {{ .Values.discourse.smtp.authentication | quote }}
+  DISCOURSE_SMTP_AUTHENTICATION: {{ .Values.discourse.smtp.authentication | quote }}
   {{- end }}
-  SMTP_START_TLS: {{ ternary "TRUE" "FALSE" .Values.discourse.smtp.enableStartTls | quote }}
+  DISCOURSE_SMTP_ENABLE_START_TLS: {{ .Values.discourse.smtp.enableStartTls | quote }}
 
   # -- Serving --
-  SERVE_STATIC_ASSETS: {{ ternary "TRUE" "FALSE" .Values.discourse.serveStaticAssets | quote }}
-  DELIVER_SECURE_ASSETS: {{ ternary "TRUE" "FALSE" .Values.discourse.forceHttps | quote }}
+  DISCOURSE_SERVE_STATIC_ASSETS: {{ .Values.discourse.serveStaticAssets | quote }}
+  DISCOURSE_FORCE_HTTPS: {{ .Values.discourse.forceHttps | quote }}
 
-  # -- Performance --
+  # -- Unicorn --
   UNICORN_WORKERS: {{ .Values.discourse.unicornWorkers | quote }}
-  SIDEKIQ_THREADS: {{ .Values.discourse.sidekiqThreads | quote }}
-
-  # -- Startup behavior --
-  ENABLE_DB_MIGRATE: {{ ternary "TRUE" "FALSE" .Values.discourse.enableDbMigrate | quote }}
-  ENABLE_PRECOMPILE_ASSETS: {{ ternary "TRUE" "FALSE" .Values.discourse.enablePrecompileAssets | quote }}
-
-  # -- Admin (first boot only) --
-  {{- if .Values.discourse.admin.email }}
-  ADMIN_EMAIL: {{ .Values.discourse.admin.email | quote }}
-  {{- end }}
-  {{- if .Values.discourse.admin.username }}
-  ADMIN_USER: {{ .Values.discourse.admin.username | quote }}
-  {{- end }}
-  {{- if .Values.discourse.admin.name }}
-  ADMIN_NAME: {{ .Values.discourse.admin.name | quote }}
-  {{- end }}
-
-  # -- Plugins --
-  {{- range $name, $enabled := .Values.discourse.plugins }}
-  PLUGIN_ENABLE_{{ $name | upper | replace "-" "_" }}: {{ ternary "TRUE" "FALSE" $enabled | quote }}
-  {{- end }}
+  # Prevent Unicorn from spawning Sidekiq -- we run Sidekiq as a separate container
+  UNICORN_SIDEKIQS: "0"
+  # Bind to all interfaces so the Service can reach port 3000
+  UNICORN_BIND_ALL: "1"

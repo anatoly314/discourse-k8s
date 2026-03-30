@@ -116,6 +116,68 @@ true
 {{- end }}
 
 {{/*
+Determine if any secret env vars or extraEnv entries exist.
+Used to conditionally render the env: key in container specs.
+*/}}
+{{- define "discourse.hasEnvVars" -}}
+{{- $has := false -}}
+{{- if or .Values.discourse.database.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.database.password) -}}
+  {{- $has = true -}}
+{{- end -}}
+{{- if or .Values.discourse.smtp.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.smtp.password) -}}
+  {{- $has = true -}}
+{{- end -}}
+{{- if or .Values.discourse.secretKeyBase.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.secretKeyBase.value) -}}
+  {{- $has = true -}}
+{{- end -}}
+{{- if .Values.discourse.extraEnv -}}
+  {{- $has = true -}}
+{{- end -}}
+{{- if $has -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+Secret environment variables block.
+Shared across unicorn, sidekiq, and migrate containers.
+Only outputs actual env var entries (no comments) so the env: key
+can be conditionally rendered.
+*/}}
+{{- define "discourse.secretEnvVars" -}}
+{{- if or .Values.discourse.database.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.database.password) }}
+- name: DISCOURSE_DB_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ default (include "discourse.secretName" .) .Values.discourse.database.existingSecret }}
+      key: {{ .Values.discourse.database.secretKey }}
+{{- end }}
+{{- if or .Values.discourse.smtp.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.smtp.password) }}
+- name: DISCOURSE_SMTP_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ default (include "discourse.secretName" .) .Values.discourse.smtp.existingSecret }}
+      key: {{ .Values.discourse.smtp.secretKey }}
+{{- end }}
+{{- if or .Values.discourse.secretKeyBase.existingSecret (and (include "discourse.createSecret" .) .Values.discourse.secretKeyBase.value) }}
+- name: DISCOURSE_SECRET_KEY_BASE
+  valueFrom:
+    secretKeyRef:
+      name: {{ default (include "discourse.secretName" .) .Values.discourse.secretKeyBase.existingSecret }}
+      key: {{ .Values.discourse.secretKeyBase.secretKey }}
+{{- end }}
+{{- end }}
+
+{{/*
+Sidekiq command with configurable concurrency and all Discourse queues.
+Discourse uses 4 weighted queues: critical (8), default (4), low (2), ultra_low (1).
+Without explicit -q flags, standalone Sidekiq only processes "default".
+*/}}
+{{- define "discourse.sidekiqCommand" -}}
+["bundle", "exec", "sidekiq", "-e", "production", "-c", {{ .Values.discourse.sidekiqConcurrency | quote }}, "-q", "critical,8", "-q", "default,4", "-q", "low,2", "-q", "ultra_low,1"]
+{{- end }}
+
+{{/*
 PVC name for uploads.
 */}}
 {{- define "discourse.uploadsPvcName" -}}
