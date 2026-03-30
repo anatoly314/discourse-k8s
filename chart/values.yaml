@@ -55,7 +55,7 @@ discourse:
     username: "admin"
     email: ""
     name: "Admin User"
-    # Inline password (>= 10 chars). Ignored if existingSecret is set.
+    # Inline password (>= 15 chars for admin). Ignored if existingSecret is set.
     password: ""
     # Use an existing Secret for admin password
     existingSecret: ""

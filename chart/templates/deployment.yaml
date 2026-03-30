@@ -128,6 +128,69 @@ spec:
             {{- end }}
           {{- end }}
 
+        # ---- Create admin user (first boot only, idempotent) ----
+        {{- if or .Values.discourse.admin.existingSecret .Values.discourse.admin.password }}
+        - name: create-admin
+          image: {{ include "discourse.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["rails", "runner"]
+          args:
+            - |
+              email = ENV['DISCOURSE_DEVELOPER_EMAILS']&.split(',')&.first&.strip
+              email = ENV['DISCOURSE_ADMIN_EMAIL'] if ENV['DISCOURSE_ADMIN_EMAIL'].present?
+              abort "No admin email configured" if email.blank?
+
+              if User.find_by_email(email)
+                puts "Admin already exists: #{email}"
+              else
+                password = ENV['DISCOURSE_ADMIN_PASSWORD']
+                abort "DISCOURSE_ADMIN_PASSWORD not set" if password.blank?
+
+                username = ENV.fetch('DISCOURSE_ADMIN_USERNAME', email.split('@').first)
+                name = ENV.fetch('DISCOURSE_ADMIN_NAME', 'Admin')
+
+                user = User.new(
+                  email: email,
+                  username: UserNameSuggester.suggest(username),
+                  name: name,
+                  password: password,
+                  active: true,
+                  approved: true
+                )
+                user.save!
+                user.grant_admin!
+                user.change_trust_level!(TrustLevel[1]) if user.trust_level < 1
+                user.email_tokens.update_all(confirmed: true)
+                user.activate
+                puts "Admin created: #{email} (username: #{user.username})"
+              end
+          envFrom:
+            - configMapRef:
+                name: {{ include "discourse.configmapName" . }}
+          env:
+            {{- include "discourse.secretEnvVars" . | nindent 12 }}
+            - name: DISCOURSE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "discourse.secretName" .) .Values.discourse.admin.existingSecret }}
+                  key: {{ .Values.discourse.admin.secretKey }}
+            {{- if .Values.discourse.admin.email }}
+            - name: DISCOURSE_ADMIN_EMAIL
+              value: {{ .Values.discourse.admin.email | quote }}
+            {{- end }}
+            {{- if .Values.discourse.admin.username }}
+            - name: DISCOURSE_ADMIN_USERNAME
+              value: {{ .Values.discourse.admin.username | quote }}
+            {{- end }}
+            {{- if .Values.discourse.admin.name }}
+            - name: DISCOURSE_ADMIN_NAME
+              value: {{ .Values.discourse.admin.name | quote }}
+            {{- end }}
+            {{- with .Values.discourse.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- end }}
+
       containers:
         # ---- Pitchfork web server (Discourse's unicorn successor, port 3000) ----
         - name: web

@@ -11,10 +11,10 @@ Created because no well-maintained, free Helm chart exists for Discourse. Bitnam
 |  Pod                                                             |
 |                                                                  |
 |  initContainers (sequential after redis sidecar starts):         |
-|  +--------------------+    +--------------------+                |
-|  | wait-for-postgres  |--->|      migrate       |                |
-|  |  (busybox:nc)      |    | rake db:migrate    |                |
-|  +--------------------+    +--------------------+                |
+|  +--------------------+  +----------------+  +--------------+   |
+|  | wait-for-postgres  |->|    migrate     |->| create-admin |   |
+|  |  (busybox:nc)      |  | rake db:migrate|  | (first boot) |   |
+|  +--------------------+  +----------------+  +--------------+   |
 |                                                                  |
 |  containers:                                                     |
 |  +--------------------+  +--------------------+  +-----------+   |
@@ -46,6 +46,7 @@ The pod runs three containers from two images:
 1. **redis** (native sidecar) -- Starts first with `restartPolicy: Always`, which makes it a sidecar init container that keeps running alongside regular containers. This is a Kubernetes 1.28+ feature.
 2. **wait-for-postgres** -- Polls the PostgreSQL host with `nc` until it responds.
 3. **migrate** -- Runs `bundle exec rake db:migrate`. Migrations acquire a distributed mutex via Redis to prevent concurrent runs, which is why Redis must be running before this step.
+4. **create-admin** -- Creates the admin user if it doesn't exist (first boot only). Uses the email from `discourse.developerEmails` and password from `discourse.admin.existingSecret`. Idempotent -- skips if the user already exists. Only runs when an admin password is configured.
 
 ### Why Redis as a native sidecar?
 
@@ -111,7 +112,7 @@ discourse:
 
   admin:
     email: "admin@example.com"
-    password: "changeme1234"   # min 10 chars
+    password: "changeme1234"   # min 10 chars, break-glass access
 
   database:
     host: postgres.svc.cluster.local
@@ -153,22 +154,29 @@ helm install discourse chart/ \
 
 ### 6. Wait for first boot
 
-First startup takes a few minutes while database migrations run. Monitor progress:
+First startup takes a few minutes while init containers run (migrations + admin creation). Monitor progress:
 
 ```bash
-# Watch the migrate init container
+# Watch migrations
 kubectl logs -f deploy/discourse -c migrate -n discourse
 
-# Once migrations complete, watch the web server
+# Watch admin creation
+kubectl logs -f deploy/discourse -c create-admin -n discourse
+
+# Once init completes, watch the web server
 kubectl logs -f deploy/discourse -c web -n discourse
 ```
 
-The startup probe allows up to ~10 minutes before marking the pod as failed. Once ready:
+The startup probe allows up to ~10 minutes before marking the pod as failed. On first boot, the `create-admin` init container creates an admin account using the email from `discourse.developerEmails` and the password from the configured Secret. On subsequent boots, it detects the user already exists and skips.
+
+Once ready:
 
 ```bash
 kubectl port-forward svc/discourse 3000:80 -n discourse
 # Open http://localhost:3000
 ```
+
+If OIDC is configured, go to `/auth/oidc` to log in via your identity provider. The admin password from Vault serves as emergency break-glass access if your identity provider is unavailable.
 
 ## Parameters
 
@@ -563,7 +571,13 @@ kubectl logs deploy/discourse -c redis -n discourse
 
 **Admin account not created**
 
-Set both `discourse.developerEmails` and `discourse.admin.email` (with a matching email) for first-boot admin creation. The admin is only created on the very first startup with an empty database.
+The `create-admin` init container only runs when `discourse.admin.existingSecret` or `discourse.admin.password` is set. Check the init container logs:
+
+```bash
+kubectl logs deploy/discourse -c create-admin -n discourse
+```
+
+The admin email defaults to the first entry in `discourse.developerEmails` unless `discourse.admin.email` is explicitly set. The admin is only created on the very first startup with an empty database -- subsequent boots skip if the user already exists.
 
 **Kubernetes version too old for native sidecar**
 
