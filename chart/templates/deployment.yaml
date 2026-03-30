@@ -133,7 +133,7 @@ spec:
         - name: create-admin
           image: {{ include "discourse.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["rails", "runner"]
+          command: ["bundle", "exec", "rails", "runner"]
           args:
             - |
               email = ENV['DISCOURSE_DEVELOPER_EMAILS']&.split(',')&.first&.strip
