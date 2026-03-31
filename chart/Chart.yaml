@@ -2,8 +2,8 @@ apiVersion: v2
 name: discourse
 description: A Helm chart for deploying Discourse forum on Kubernetes with Redis sidecar
 type: application
-version: 0.3.2
-appVersion: "v2026.3.0-latest.1"
+version: 0.3.3
+appVersion: "v2026.4.0-latest"
 home: https://github.com/anatoly314/discourse-k8s
 sources:
   - https://github.com/anatoly314/discourse-k8s
