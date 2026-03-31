@@ -24,7 +24,7 @@ FROM ${BASE_IMAGE}
 
 # Re-declare after FROM so they're available in RUN and LABEL instructions.
 ARG BASE_IMAGE
-ARG DISCOURSE_VERSION=v2026.3.0-latest
+ARG DISCOURSE_VERSION=v2026.3.0-latest.1
 
 LABEL org.opencontainers.image.title="Discourse (AnkiMCP)" \
       org.opencontainers.image.description="Discourse forum with plugins and precompiled assets for Kubernetes" \
