@@ -1,8 +1,12 @@
 # =============================================================================
-# Docker image CI/CD
+# Docker image CI/CD — Multi-arch (amd64 + arm64)
 # =============================================================================
-# Builds the custom Discourse image (Nfrastack base + plugins + precompiled
-# assets). Pushes to GHCR only on tag push matching `docker/v*`.
+# Builds the custom Discourse image (discourse/base:slim + plugins +
+# precompiled assets) for both amd64 and arm64 using native runners.
+#
+# QEMU emulation can't handle Discourse's asset precompilation (native Ruby
+# gems crash under cross-arch emulation), so each platform builds on its own
+# native runner, then a manifest job merges them into one multi-arch image.
 #
 # Trigger examples:
 #   git tag docker/v2026.2.1 && git push origin docker/v2026.2.1
@@ -27,7 +31,10 @@ permissions:
   packages: write
 
 jobs:
-  build:
+  # ===========================================================================
+  # Build amd64 image on a native x86_64 runner
+  # ===========================================================================
+  build-amd64:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -50,7 +57,6 @@ jobs:
         id: version
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/docker/v* ]]; then
-            # Strip the "docker/" prefix, keep the "v" (e.g., docker/v2026.2.1 -> v2026.2.1)
             VERSION="${GITHUB_REF#refs/tags/docker/}"
             echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
             echo "is_release=true" >> "$GITHUB_OUTPUT"
@@ -65,11 +71,10 @@ jobs:
         with:
           images: ghcr.io/anatoly314/discourse-k8s
           tags: |
-            # On tag push: use the version from the tag + latest
-            type=raw,value=${{ steps.version.outputs.value }},enable=${{ steps.version.outputs.is_release }}
-            type=raw,value=latest,enable=${{ steps.version.outputs.is_release }}
+            # On tag push: version with platform suffix
+            type=raw,value=${{ steps.version.outputs.value }}-amd64,enable=${{ steps.version.outputs.is_release }}
             # On main push / PR: SHA-based tag for build validation
-            type=sha,enable=${{ steps.version.outputs.is_release == 'false' }}
+            type=sha,suffix=-amd64,enable=${{ steps.version.outputs.is_release == 'false' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -81,6 +86,107 @@ jobs:
           # DISCOURSE_VERSION is pinned in the Dockerfile (e.g., v2026.3.0-latest).
           # Our docker/v* tags version the IMAGE, not Discourse itself.
           # Only override DISCOURSE_VERSION if you need a different Discourse release.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=build-amd64
+          cache-to: type=gha,mode=max,scope=build-amd64
+          platforms: linux/amd64
+
+  # ===========================================================================
+  # Build arm64 image on a native ARM runner
+  # ===========================================================================
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/docker/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/docker/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/docker/}"
+            echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/anatoly314/discourse-k8s
+          tags: |
+            # On tag push: version with platform suffix
+            type=raw,value=${{ steps.version.outputs.value }}-arm64,enable=${{ steps.version.outputs.is_release }}
+            # On main push / PR: SHA-based tag for build validation
+            type=sha,suffix=-arm64,enable=${{ steps.version.outputs.is_release == 'false' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/
+          push: ${{ steps.version.outputs.is_release == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=build-arm64
+          cache-to: type=gha,mode=max,scope=build-arm64
+          platforms: linux/arm64
+
+  # ===========================================================================
+  # Merge platform images into a single multi-arch manifest
+  # ===========================================================================
+  # Runs only on tag push (release). Takes the two platform-specific images
+  # pushed by the build jobs and creates a unified manifest list tagged with
+  # the version and "latest".
+  # ===========================================================================
+  manifest:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/docker/v')
+    needs: [build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/docker/}"
+          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create multi-arch manifest
+        env:
+          IMAGE: ghcr.io/anatoly314/discourse-k8s
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE}:${VERSION}" \
+            -t "${IMAGE}:latest" \
+            "${IMAGE}:${VERSION}-amd64" \
+            "${IMAGE}:${VERSION}-arm64"
+
+      - name: Inspect manifest
+        env:
+          IMAGE: ghcr.io/anatoly314/discourse-k8s
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}"
