@@ -34,6 +34,18 @@ LABEL org.opencontainers.image.title="Discourse (AnkiMCP)" \
       org.opencontainers.image.licenses="GPL-2.0-only"
 
 # =============================================================================
+# Upgrade PostgreSQL client to match the server version
+# =============================================================================
+# discourse/base:slim ships pg_dump 15, but our CNPG cluster runs PG 17.
+# pg_dump refuses to dump a newer server, breaking Discourse's built-in
+# backup feature. Install the PG 17 client from the official PGDG repo.
+# =============================================================================
+ARG PG_MAJOR=17
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client-${PG_MAJOR} && \
+    rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
 # Pin Discourse to the requested version
 # =============================================================================
 # The slim base image clones Discourse from the main branch into
