@@ -72,7 +72,7 @@ Discourse plugins contribute JavaScript and CSS to the compiled asset bundle. Th
 **Option A: Use the pre-built image from GHCR**
 
 ```
-ghcr.io/anatoly314/discourse-k8s:v0.3.0
+ghcr.io/anatoly314/discourse-k8s:v0.5.0
 ```
 
 **Option B: Build your own**
@@ -104,7 +104,7 @@ openssl rand -hex 64
 # my-values.yaml
 image:
   repository: ghcr.io/anatoly314/discourse-k8s
-  tag: v0.3.0
+  tag: v0.5.0
 
 discourse:
   hostname: forum.example.com
@@ -414,7 +414,8 @@ The image defaults to running **Pitchfork** (Discourse's unicorn successor) as t
 | Arg | Default | Description |
 |-----|---------|-------------|
 | `BASE_IMAGE` | `discourse/base:slim` | Base image providing Ruby, Node, and system dependencies |
-| `DISCOURSE_VERSION` | `v2026.3.0-latest` | Discourse release tag to check out and build |
+| `DISCOURSE_VERSION` | `v2026.3.0-latest.1` | Discourse release tag to check out and build |
+| `PG_MAJOR` | `17` | PostgreSQL client version to install (must match your PG server) |
 
 ### Build examples
 
@@ -457,7 +458,8 @@ These environment variables are set in the Dockerfile as runtime defaults:
 | Name | Description | Default Value |
 | ---- | ----------- | ------------- |
 | `BASE_IMAGE` | Base image used as the build foundation | `discourse/base:slim` |
-| `DISCOURSE_VERSION` | Discourse release tag to check out from the repository | `v2026.3.0-latest` |
+| `DISCOURSE_VERSION` | Discourse release tag to check out from the repository | `v2026.3.0-latest.1` |
+| `PG_MAJOR` | PostgreSQL client version (must match your PG server for backups to work) | `17` |
 
 ## CI/CD
 
