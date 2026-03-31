@@ -83,4 +83,4 @@ jobs:
           # Only override DISCOURSE_VERSION if you need a different Discourse release.
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
