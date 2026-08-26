@@ -260,6 +260,18 @@ RUN set -eu; \
     sudo -u discourse rm -rf .git
 
 # =============================================================================
+# Remove npm
+# =============================================================================
+# discourse/base:slim ships npm alongside Node, but nothing here uses it: the
+# JS install runs through pnpm and the runtime is pitchfork. npm bundles its
+# own copy of node-tar and friends, which Trivy scans and flags (e.g.
+# CVE-2026-59873 in tar 7.5.11 via npm 10.9.8). Dropping the unused tool
+# removes that whole dependency surface rather than patching it release by
+# release.
+# =============================================================================
+RUN rm -rf /usr/lib/node_modules/npm /usr/bin/npm /usr/bin/npx
+
+# =============================================================================
 # Runtime environment defaults
 # =============================================================================
 # UNICORN_SIDEKIQS=0        — Do NOT spawn Sidekiq from the web server process.
